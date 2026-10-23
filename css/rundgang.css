@@ -10,6 +10,13 @@ html, body {
     position: absolute;
     inset: 0;
     cursor: grab;
+    touch-action: none;
+}
+
+body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
 }
 
 #welt:active {
@@ -105,6 +112,99 @@ html, body {
     font-weight: 600;
     font-size: 14px;
     border-radius: 4px;
+}
+
+/* ---------- Handy-Modus ---------- */
+
+#hilfe-knopf, #joystick, #sprung-knopf, body.handy .nur-pc, body:not(.handy) .nur-handy {
+    display: none;
+}
+
+body.handy #hilfe-knopf {
+    display: block;
+    position: absolute;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    width: 40px;
+    height: 40px;
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    border-radius: 50%;
+    background: rgba(20, 30, 20, 0.72);
+    color: #fff;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+body.handy #hilfe {
+    top: calc(60px + env(safe-area-inset-top, 0px));
+    max-width: calc(100vw - 48px);
+}
+
+body.handy #hilfe li {
+    padding: 3px 0;
+}
+
+body.handy #minikarte-rahmen {
+    left: auto;
+    bottom: auto;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+}
+
+body.handy #minikarte {
+    width: 120px;
+    height: 120px;
+    border-width: 3px;
+}
+
+body.handy #ortsname {
+    max-width: 140px;
+    font-size: 12px;
+}
+
+body.handy #joystick {
+    display: block;
+    position: absolute;
+    left: calc(28px + env(safe-area-inset-left, 0px));
+    bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+    width: 130px;
+    height: 130px;
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    border-radius: 50%;
+    background: rgba(20, 30, 20, 0.35);
+    touch-action: none;
+}
+
+#joystick-knopf {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 56px;
+    height: 56px;
+    margin: -28px 0 0 -28px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.85);
+    pointer-events: none;
+}
+
+body.handy #sprung-knopf {
+    display: block;
+    position: absolute;
+    right: calc(28px + env(safe-area-inset-right, 0px));
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    width: 80px;
+    height: 80px;
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    border-radius: 50%;
+    background: rgba(20, 30, 20, 0.6);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    touch-action: none;
+}
+
+body.handy #sprung-knopf:active {
+    background: rgba(31, 81, 48, 0.9);
 }
 
 #quelle {

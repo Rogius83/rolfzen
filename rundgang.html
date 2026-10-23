@@ -13,7 +13,13 @@
 
     <div id="hilfe">
         <b>Rundgang Rolfzen</b>
-        <table>
+        <table class="nur-handy">
+            <tr><td>Joystick links</td><td>Laufen, ganz ausgelenkt rennen</td></tr>
+            <tr><td>Wischen</td><td>Umsehen</td></tr>
+            <tr><td>Springen</td><td>Taste rechts unten</td></tr>
+            <tr><td>Ort antippen</td><td>Dorthin springen</td></tr>
+        </table>
+        <table class="nur-pc">
             <tr><td>W A S D / Pfeile</td><td>Laufen</td></tr>
             <tr><td>Umschalt</td><td>Rennen</td></tr>
             <tr><td>Leertaste</td><td>Springen</td></tr>
@@ -26,6 +32,10 @@
         <ol id="ortsliste"></ol>
         <a href="index.html">← Zur Karte</a>
     </div>
+
+    <button id="hilfe-knopf" type="button" aria-label="Hilfe ein- oder ausblenden">?</button>
+    <div id="joystick"><div id="joystick-knopf"></div></div>
+    <button id="sprung-knopf" type="button">Springen</button>
 
     <div id="hinweis"></div>
 

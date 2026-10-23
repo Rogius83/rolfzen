@@ -6,6 +6,11 @@
 
     const D = ROLFZEN_3D;
 
+    // Handy-Modus: weniger Grafiklast und Touch-Steuerung (mit ?handy am PC erzwingbar)
+    const HANDY = new URLSearchParams(location.search).has('handy') ||
+        window.matchMedia('(pointer: coarse)').matches;
+    document.body.classList.toggle('handy', HANDY);
+
     // ---------- Hilfsfunktionen ----------
 
     function zufallsgenerator(seed) {
@@ -136,28 +141,41 @@
     const farbe = hex => new THREE.Color(hex);
     const vertexMaterial = () => new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
 
+    // Flache Bodenebenen schreiben keine Tiefe und werden in fester Reihenfolge zuerst gezeichnet.
+    // So überdecken sie sich ohne Flimmern, auch ohne teuren logarithmischen Tiefenpuffer.
+    function bodenEbene(mesh, reihenfolge) {
+        mesh.material.depthWrite = false;
+        mesh.renderOrder = reihenfolge;
+        mesh.receiveShadow = true;
+        szene.add(mesh);
+    }
+
     // ---------- Szene ----------
 
     const container = document.getElementById('welt');
-    const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const renderer = new THREE.WebGLRenderer({ antialias: !HANDY });
+    renderer.setPixelRatio(HANDY ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = HANDY ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
 
     const himmel = 0xa9d3f0;
     const szene = new THREE.Scene();
     szene.background = new THREE.Color(himmel);
-    szene.fog = new THREE.Fog(himmel, 120, 700);
+    szene.fog = HANDY ? new THREE.Fog(himmel, 60, 320) : new THREE.Fog(himmel, 120, 700);
 
-    const kamera = new THREE.PerspectiveCamera(65, 1, 0.3, 2000);
+    const kamera = new THREE.PerspectiveCamera(65, 1, 0.3, HANDY ? 450 : 2000);
 
     szene.add(new THREE.HemisphereLight(0xe8f2ff, 0x5d6b3f, 0.5));
     const sonne = new THREE.DirectionalLight(0xfff3dd, 0.6);
     sonne.castShadow = true;
-    sonne.shadow.mapSize.set(2048, 2048);
-    Object.assign(sonne.shadow.camera, { left: -90, right: 90, top: 90, bottom: -90, near: 1, far: 400 });
+    const schattenWeite = HANDY ? 50 : 90;
+    sonne.shadow.mapSize.set(HANDY ? 1024 : 2048, HANDY ? 1024 : 2048);
+    Object.assign(sonne.shadow.camera, {
+        left: -schattenWeite, right: schattenWeite, top: schattenWeite, bottom: -schattenWeite, near: 1, far: 400,
+    });
     sonne.shadow.bias = -0.0005;
+    sonne.shadow.normalBias = HANDY ? 0.12 : 0.04;
     szene.add(sonne, sonne.target);
     const sonnenVersatz = new THREE.Vector3(70, 120, 50);
 
@@ -193,17 +211,16 @@
             new THREE.MeshLambertMaterial({ color: 0x8fa36b }));
         aussen.rotation.x = -Math.PI / 2;
         aussen.position.y = -0.1;
-        aussen.receiveShadow = true;
-        szene.add(aussen);
+        bodenEbene(aussen, -6);
 
+        // Innerhalb eines Meshes zählt die Reihenfolge der Dreiecke: untere Ebenen zuerst
         const boden = new GeometrieBauer();
         boden.flaeche(D.grenze, 0, farbe('#86ad5f'));
-        for (const f of D.flaechen) {
+        const sortiert = D.flaechen.slice().sort((a, b) => FLAECHEN_HOEHE[a.t] - FLAECHEN_HOEHE[b.t]);
+        for (const f of sortiert) {
             boden.flaeche(f.p, FLAECHEN_HOEHE[f.t], farbe(auswahl(FLAECHEN_FARBEN[f.t])));
         }
-        const bodenMesh = boden.mesh(vertexMaterial());
-        bodenMesh.receiveShadow = true;
-        szene.add(bodenMesh);
+        bodenEbene(boden.mesh(vertexMaterial()), -5);
 
         // Halbtransparente Wand an der Ortsgrenze
         const wand = new GeometrieBauer();
@@ -229,10 +246,19 @@
     const strassenRaster = new Raster(25);
 
     function strassenBauen() {
+        const gewaesser = new GeometrieBauer();
+        const blau = farbe('#4f8fc0');
+        for (const g of D.gewaesser) gewaesser.band(g.p, g.w, 0.2, blau);
+        bodenEbene(gewaesser.mesh(vertexMaterial()), -4);
+
+        // Feldwege zuerst, damit befestigte Straßen an Kreuzungen oben liegen
+        const unbefestigt = s => s.t === 'track' || s.t === 'path' || s.t === 'footway';
+        const sortiert = D.strassen.slice().sort((a, b) => unbefestigt(b) - unbefestigt(a));
         const bauer = new GeometrieBauer();
+        const linien = new GeometrieBauer();
         const weiss = farbe('#f2f2ee');
-        for (const s of D.strassen) {
-            const y = s.t === 'track' || s.t === 'path' || s.t === 'footway' ? 0.21 : 0.24;
+        for (const s of sortiert) {
+            const y = unbefestigt(s) ? 0.21 : 0.24;
             bauer.band(s.p, s.w, y, farbe(STRASSEN_FARBE[s.t]));
 
             if (MITTELLINIE.has(s.t)) {
@@ -244,7 +270,7 @@
                         const a = [ax + (bx - ax) * t / l, az + (bz - az) * t / l];
                         const b = [ax + (bx - ax) * (t + 3) / l, az + (bz - az) * (t + 3) / l];
                         const nx = -(bz - az) / l * 0.07, nz = (bx - ax) / l * 0.07;
-                        bauer.viereck([a[0] + nx, 0.26, a[1] + nz], [b[0] + nx, 0.26, b[1] + nz],
+                        linien.viereck([a[0] + nx, 0.26, a[1] + nz], [b[0] + nx, 0.26, b[1] + nz],
                             [b[0] - nx, 0.26, b[1] - nz], [a[0] - nx, 0.26, a[1] - nz], weiss);
                     }
                     strecke += l;
@@ -257,12 +283,8 @@
                     Math.min(ax, bx) - 20, Math.min(az, bz) - 20, Math.max(ax, bx) + 20, Math.max(az, bz) + 20);
             }
         }
-        const blau = farbe('#4f8fc0');
-        for (const g of D.gewaesser) bauer.band(g.p, g.w, 0.2, blau);
-
-        const mesh = bauer.mesh(vertexMaterial());
-        mesh.receiveShadow = true;
-        szene.add(mesh);
+        bodenEbene(bauer.mesh(vertexMaterial()), -3);
+        if (linien.pos.length) bodenEbene(linien.mesh(vertexMaterial()), -2);
     }
 
     function naechsteStrasse(x, z, maxAbstand, nurMitNamen) {
@@ -470,13 +492,17 @@
             }
         }
 
+        // [Rasterabstand in m, Höchstzahl]
+        const dichte = HANDY
+            ? { wald: [14, 1500], busch: [9, 800], garten: [26, 2000] }
+            : { wald: [10, 3500], busch: [6, 3000], garten: [20, 4500] };
         for (const f of D.flaechen) {
             if (f.t === 'wald') {
-                streuen(f.p, 10, 0.9, zufall() < 0.5 ? laub : nadel, 3500, false);
+                streuen(f.p, dichte.wald[0], 0.9, zufall() < 0.5 ? laub : nadel, dichte.wald[1], false);
             } else if (f.t === 'gebuesch') {
-                streuen(f.p, 6, 0.7, busch, 3000, false);
+                streuen(f.p, dichte.busch[0], 0.7, busch, dichte.busch[1], false);
             } else if (f.t === 'wohngebiet' || f.t === 'friedhof') {
-                streuen(f.p, 20, 0.35, laub, 4500, true);
+                streuen(f.p, dichte.garten[0], 0.35, laub, dichte.garten[1], true);
             }
         }
         // Bäume entlang der Bäche
@@ -504,7 +530,7 @@
                 mesh.setMatrixAt(i, m);
                 if (material === kronenMaterial) mesh.setColorAt(i, auswahl(gruenToene));
             });
-            mesh.castShadow = true;
+            mesh.castShadow = !HANDY;
             szene.add(mesh);
         }
 
@@ -633,18 +659,76 @@
     window.addEventListener('keyup', e => tasten.delete(e.code));
     window.addEventListener('blur', () => tasten.clear());
 
+    // Zeiger an ein Element binden, damit Ziehen auch außerhalb weiterläuft (fehlt bei manchen Geräten)
+    function festhalten(element, id) {
+        try {
+            element.setPointerCapture(id);
+        } catch (fehler) {
+            // ohne Bindung funktioniert die Steuerung weiterhin, nur nicht über den Rand hinaus
+        }
+    }
+
+    // Umsehen durch Ziehen mit Maus oder Finger; nur der Finger, der zuerst aufgesetzt wurde, zählt
     let ziehen = null;
     container.addEventListener('pointerdown', e => {
-        ziehen = { x: e.clientX, y: e.clientY };
-        container.setPointerCapture(e.pointerId);
+        if (ziehen) return;
+        ziehen = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        festhalten(container, e.pointerId);
     });
     container.addEventListener('pointermove', e => {
-        if (!ziehen) return;
+        if (!ziehen || e.pointerId !== ziehen.id) return;
         kam.gier -= (e.clientX - ziehen.x) * 0.005;
         kam.neigung = Math.max(-0.1, Math.min(1.3, kam.neigung + (e.clientY - ziehen.y) * 0.004));
-        ziehen = { x: e.clientX, y: e.clientY };
+        ziehen.x = e.clientX;
+        ziehen.y = e.clientY;
     });
-    container.addEventListener('pointerup', () => { ziehen = null; });
+    const ziehenEnde = e => { if (ziehen && e.pointerId === ziehen.id) ziehen = null; };
+    container.addEventListener('pointerup', ziehenEnde);
+    container.addEventListener('pointercancel', ziehenEnde);
+
+    // Touch-Joystick: x = rechts, y = unten, jeweils -1 … 1
+    const stick = { x: 0, y: 0 };
+    if (HANDY) touchSteuerungEinrichten();
+
+    function touchSteuerungEinrichten() {
+        const hilfe = document.getElementById('hilfe');
+        hilfe.hidden = true;
+        document.getElementById('hilfe-knopf').addEventListener('click', () => { hilfe.hidden = !hilfe.hidden; });
+
+        const feld = document.getElementById('joystick');
+        const knopf = document.getElementById('joystick-knopf');
+        let finger = null;
+        function setzen(e) {
+            const r = feld.getBoundingClientRect();
+            const radius = r.width / 2;
+            let dx = e.clientX - (r.left + radius), dy = e.clientY - (r.top + radius);
+            const l = Math.hypot(dx, dy);
+            if (l > radius) { dx *= radius / l; dy *= radius / l; }
+            stick.x = dx / radius;
+            stick.y = dy / radius;
+            knopf.style.transform = `translate(${dx}px, ${dy}px)`;
+        }
+        feld.addEventListener('pointerdown', e => {
+            finger = e.pointerId;
+            festhalten(feld, finger);
+            setzen(e);
+        });
+        feld.addEventListener('pointermove', e => { if (e.pointerId === finger) setzen(e); });
+        const loslassen = e => {
+            if (e.pointerId !== finger) return;
+            finger = null;
+            stick.x = stick.y = 0;
+            knopf.style.transform = '';
+        };
+        feld.addEventListener('pointerup', loslassen);
+        feld.addEventListener('pointercancel', loslassen);
+
+        const sprung = document.getElementById('sprung-knopf');
+        sprung.addEventListener('pointerdown', () => tasten.add('Space'));
+        for (const ereignis of ['pointerup', 'pointercancel', 'pointerleave']) {
+            sprung.addEventListener(ereignis, () => tasten.delete('Space'));
+        }
+    }
     container.addEventListener('wheel', e => {
         kam.abstand = Math.max(2.5, Math.min(30, kam.abstand * (e.deltaY > 0 ? 1.1 : 0.9)));
         e.preventDefault();
@@ -687,8 +771,13 @@
     }
 
     function bewegen(dt) {
-        const vor = (tasten.has('KeyW') || tasten.has('ArrowUp') ? 1 : 0) - (tasten.has('KeyS') || tasten.has('ArrowDown') ? 1 : 0);
-        const seit = (tasten.has('KeyD') || tasten.has('ArrowRight') ? 1 : 0) - (tasten.has('KeyA') || tasten.has('ArrowLeft') ? 1 : 0);
+        // Joystick mit kleiner Totzone; voll ausgelenkt wird gerannt
+        const stickStaerke = Math.hypot(stick.x, stick.y);
+        const stickAktiv = stickStaerke > 0.15;
+        const vor = (tasten.has('KeyW') || tasten.has('ArrowUp') ? 1 : 0) - (tasten.has('KeyS') || tasten.has('ArrowDown') ? 1 : 0) +
+            (stickAktiv ? -stick.y : 0);
+        const seit = (tasten.has('KeyD') || tasten.has('ArrowRight') ? 1 : 0) - (tasten.has('KeyA') || tasten.has('ArrowLeft') ? 1 : 0) +
+            (stickAktiv ? stick.x : 0);
         if (tasten.has('KeyQ')) kam.gier += 1.8 * dt;
         if (tasten.has('KeyE')) kam.gier -= 1.8 * dt;
 
@@ -697,11 +786,11 @@
         const rx = Math.cos(kam.gier), rz = -Math.sin(kam.gier);
         let dx = fx * vor + rx * seit, dz = fz * vor + rz * seit;
         const laenge = Math.hypot(dx, dz);
-        const rennen = tasten.has('ShiftLeft') || tasten.has('ShiftRight');
-        const zielTempo = laenge > 0 ? (rennen ? 6.5 : 2.4) : 0;
+        const rennen = tasten.has('ShiftLeft') || tasten.has('ShiftRight') || stickStaerke > 0.9;
+        const zielTempo = laenge > 0.01 ? (rennen ? 6.5 : 2.4) * Math.min(1, laenge) : 0;
         spieler.tempo += (zielTempo - spieler.tempo) * Math.min(1, dt * 8);
 
-        if (laenge > 0) {
+        if (laenge > 0.01) {
             dx /= laenge; dz /= laenge;
             const zielRichtung = Math.atan2(dx, dz);
             let diff = zielRichtung - spieler.richtung;
@@ -864,13 +953,19 @@
     // ---------- Hauptschleife ----------
 
     const uhr = new THREE.Clock();
+    let minikarteZeit = 0;
     function schleife() {
         requestAnimationFrame(schleife);
         const dt = Math.min(uhr.getDelta(), 0.05);
         groesseAnpassen();
         bewegen(dt);
         kameraNachfuehren();
-        minikarteZeichnen();
+        // Auf dem Handy nur etwa zehnmal pro Sekunde neu zeichnen
+        minikarteZeit -= dt;
+        if (minikarteZeit <= 0) {
+            minikarteZeichnen();
+            minikarteZeit = HANDY ? 0.1 : 0;
+        }
         ortsnameAktualisieren(dt);
         renderer.render(szene, kamera);
     }
@@ -880,5 +975,5 @@
     schleife();
 
     // Für Tests und spätere Erweiterungen (z. B. Festplanung)
-    window.rundgang = { spieler, kam, tasten, szene, inGebaeude, zuOrtSpringen };
+    window.rundgang = { spieler, kam, tasten, stick, szene, inGebaeude, zuOrtSpringen, schritt: bewegen };
 })();
