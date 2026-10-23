@@ -1,0 +1,50 @@
+html, body {
+    height: 100%;
+    margin: 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #1f5130;
+    color: #fff;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.4rem;
+}
+
+header .untertitel {
+    opacity: 0.85;
+    font-size: 0.95rem;
+}
+
+header .knopf {
+    margin-left: auto;
+    padding: 5px 12px;
+    background: #ffd23f;
+    color: #1f5130;
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 4px;
+}
+
+#karte {
+    flex: 1;
+}
+
+.koordinaten {
+    background: rgba(255, 255, 255, 0.85);
+    padding: 2px 6px;
+    font-size: 12px;
+    border-radius: 3px;
+}

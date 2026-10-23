@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rolfzen – Rundgang</title>
+    <link rel="stylesheet" href="css/rundgang.css">
+</head>
+<body>
+    <div id="welt"></div>
+
+    <div id="laden">Rolfzen wird aufgebaut …</div>
+
+    <div id="hilfe">
+        <b>Rundgang Rolfzen</b>
+        <table>
+            <tr><td>W A S D / Pfeile</td><td>Laufen</td></tr>
+            <tr><td>Umschalt</td><td>Rennen</td></tr>
+            <tr><td>Leertaste</td><td>Springen</td></tr>
+            <tr><td>Q / E</td><td>Kamera drehen</td></tr>
+            <tr><td>Maus ziehen</td><td>Umsehen</td></tr>
+            <tr><td>Mausrad</td><td>Kamera-Abstand</td></tr>
+            <tr><td>1 – 5</td><td>Zu einem Ort springen</td></tr>
+            <tr><td>H</td><td>Hilfe ein/aus</td></tr>
+        </table>
+        <ol id="ortsliste"></ol>
+        <a href="index.html">← Zur Karte</a>
+    </div>
+
+    <div id="hinweis"></div>
+
+    <div id="minikarte-rahmen">
+        <canvas id="minikarte" width="220" height="220"></canvas>
+        <div id="ortsname"></div>
+    </div>
+
+    <div id="quelle">
+        Daten &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>-Mitwirkende
+    </div>
+
+    <script src="https://unpkg.com/three@0.149.0/build/three.min.js"
+            integrity="sha384-RRHfJ6w1mTlKUBMYT/hvnRiOzEB/vyRV3DrQOseb6oYfvaZSfdd0byS4bHps0k2R" crossorigin="anonymous"></script>
+    <script src="js/rolfzen-3d-daten.js"></script>
+    <script src="js/rundgang.js"></script>
+</body>
+</html>
