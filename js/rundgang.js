@@ -90,6 +90,40 @@
         }
     }
 
+    // ---------- Höhenraster (DGM1, Geobasis NRW) ----------
+
+    const H = ROLFZEN_HOEHEN;
+    const hoehenWerte = (() => {
+        const bin = atob(H.hoehen);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new Int16Array(bytes.buffer);
+    })();
+    // Tiefster Punkt wird zu y = 0, damit die Szene nicht bei 130 m schwebt
+    const BASIS = Math.floor(hoehenWerte.reduce((m, w) => Math.min(m, w), Infinity) / 10);
+
+    function rasterHoehe(s, r) {
+        s = Math.max(0, Math.min(H.spalten - 1, s));
+        r = Math.max(0, Math.min(H.zeilen - 1, r));
+        return hoehenWerte[r * H.spalten + s] / 10 - BASIS;
+    }
+
+    // Höhe an beliebiger Stelle, Dreieck für Dreieck genau wie das gezeichnete Gelände
+    // (Diagonale jeder Zelle von links oben nach rechts unten)
+    function hoehe(x, z) {
+        const fx = Math.max(0, Math.min(H.spalten - 1.0001, (x - H.x0) / H.schritt));
+        const fz = Math.max(0, Math.min(H.zeilen - 1.0001, (z - H.z0) / H.schritt));
+        const s = Math.floor(fx), r = Math.floor(fz);
+        const tx = fx - s, tz = fz - r;
+        const h00 = rasterHoehe(s, r), h11 = rasterHoehe(s + 1, r + 1);
+        if (tx >= tz) {
+            const h10 = rasterHoehe(s + 1, r);
+            return h00 + (h10 - h00) * tx + (h11 - h10) * tz;
+        }
+        const h01 = rasterHoehe(s, r + 1);
+        return h00 + (h11 - h01) * tx + (h01 - h00) * tz;
+    }
+
     // Sammelt Dreiecke mit Vertexfarben und erzeugt daraus ein einzelnes Mesh
     class GeometrieBauer {
         constructor() {
@@ -110,24 +144,35 @@
                 this.dreieck([ring[i][0], y, ring[i][1]], [ring[j][0], y, ring[j][1]], [ring[k][0], y, ring[k][1]], f);
             }
         }
-        scheibe(x, z, r, y, f) {
-            const n = 10;
+        // Punkt auf dem Gelände, um "anheben" Meter darüber
+        static aufGelaende(x, z, anheben) {
+            return [x, hoehe(x, z) + anheben, z];
+        }
+        scheibe(x, z, r, anheben, f) {
+            const n = 10, p = GeometrieBauer.aufGelaende;
             for (let i = 0; i < n; i++) {
                 const a1 = i / n * Math.PI * 2, a2 = (i + 1) / n * Math.PI * 2;
-                this.dreieck([x, y, z], [x + Math.cos(a1) * r, y, z + Math.sin(a1) * r],
-                    [x + Math.cos(a2) * r, y, z + Math.sin(a2) * r], f);
+                this.dreieck(p(x, z, anheben), p(x + Math.cos(a1) * r, z + Math.sin(a1) * r, anheben),
+                    p(x + Math.cos(a2) * r, z + Math.sin(a2) * r, anheben), f);
             }
         }
-        band(punkte, breite, y, f) {
-            const h = breite / 2;
+        // Band entlang einer Linie, das dem Gelände folgt (Stücke von höchstens 3 m)
+        band(punkte, breite, anheben, f) {
+            const h = breite / 2, p = GeometrieBauer.aufGelaende;
             for (let i = 0; i < punkte.length - 1; i++) {
                 const [ax, az] = punkte[i], [bx, bz] = punkte[i + 1];
                 const l = Math.hypot(bx - ax, bz - az);
                 if (l < 0.01) continue;
                 const nx = -(bz - az) / l * h, nz = (bx - ax) / l * h;
-                this.viereck([ax + nx, y, az + nz], [bx + nx, y, bz + nz], [bx - nx, y, bz - nz], [ax - nx, y, az - nz], f);
+                const teile = Math.ceil(l / 3);
+                for (let k = 0; k < teile; k++) {
+                    const px = ax + (bx - ax) * k / teile, pz = az + (bz - az) * k / teile;
+                    const qx = ax + (bx - ax) * (k + 1) / teile, qz = az + (bz - az) * (k + 1) / teile;
+                    this.viereck(p(px + nx, pz + nz, anheben), p(qx + nx, qz + nz, anheben),
+                        p(qx - nx, qz - nz, anheben), p(px - nx, pz - nz, anheben), f);
+                }
             }
-            for (const [x, z] of punkte) this.scheibe(x, z, h, y, f);
+            for (const [x, z] of punkte) this.scheibe(x, z, h, anheben, f);
         }
         mesh(material) {
             const g = new THREE.BufferGeometry();
@@ -141,10 +186,12 @@
     const farbe = hex => new THREE.Color(hex);
     const vertexMaterial = () => new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
 
-    // Flache Bodenebenen schreiben keine Tiefe und werden in fester Reihenfolge zuerst gezeichnet.
-    // So überdecken sie sich ohne Flimmern, auch ohne teuren logarithmischen Tiefenpuffer.
+    // Bänder auf dem Gelände (Bäche, Straßen, Linien) schreiben keine Tiefe, werden nach dem Gelände
+    // in fester Reihenfolge gezeichnet und leicht nach vorn versetzt. So überdecken sie sich ohne Flimmern.
     function bodenEbene(mesh, reihenfolge) {
-        mesh.material.depthWrite = false;
+        Object.assign(mesh.material, {
+            depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
+        });
         mesh.renderOrder = reihenfolge;
         mesh.receiveShadow = true;
         szene.add(mesh);
@@ -162,9 +209,10 @@
     const himmel = 0xa9d3f0;
     const szene = new THREE.Scene();
     szene.background = new THREE.Color(himmel);
-    szene.fog = HANDY ? new THREE.Fog(himmel, 60, 320) : new THREE.Fog(himmel, 120, 700);
+    // Das Gelände reicht 400 m über die Ortsgrenze hinaus; sein Rand verschwindet im Nebel
+    szene.fog = HANDY ? new THREE.Fog(himmel, 60, 320) : new THREE.Fog(himmel, 120, 480);
 
-    const kamera = new THREE.PerspectiveCamera(65, 1, 0.3, HANDY ? 450 : 2000);
+    const kamera = new THREE.PerspectiveCamera(65, 1, 0.3, HANDY ? 450 : 900);
 
     szene.add(new THREE.HemisphereLight(0xe8f2ff, 0x5d6b3f, 0.5));
     const sonne = new THREE.DirectionalLight(0xfff3dd, 0.6);
@@ -200,34 +248,119 @@
         friedhof: ['#7da35f'], baustelle: ['#b39b78'], sportplatz: ['#5fa64a'],
         spielplatz: ['#c2b280'], parkplatz: ['#8a8a86'],
     };
-    const FLAECHEN_HOEHE = {
-        wohngebiet: 0.04, acker: 0.08, wiese: 0.08, rasen: 0.08, wald: 0.08, gebuesch: 0.08,
-        hof: 0.12, gewerbe: 0.12, friedhof: 0.12, baustelle: 0.12,
-        sportplatz: 0.16, spielplatz: 0.16, parkplatz: 0.16, wasser: 0.18,
+    // Zeichenreihenfolge der Flächen in der Geländetextur: spätere liegen oben
+    const FLAECHEN_EBENE = {
+        wohngebiet: 1, acker: 2, wiese: 2, rasen: 2, wald: 2, gebuesch: 2,
+        hof: 3, gewerbe: 3, friedhof: 3, baustelle: 3,
+        sportplatz: 4, spielplatz: 4, parkplatz: 4, wasser: 5,
     };
+    const UMLAND_FARBE = '#8fa36b';
+
+    // Flächen, Ortsgebiet und Straßenränder werden in eine Textur gemalt, die über dem Gelände liegt
+    function gelaendeTextur() {
+        const groesse = Math.min(HANDY ? 2048 : 4096, renderer.capabilities.maxTextureSize);
+        const breite = (H.spalten - 1) * H.schritt, tiefe = (H.zeilen - 1) * H.schritt;
+        const leinwand = document.createElement('canvas');
+        leinwand.width = leinwand.height = groesse;
+        const ctx = leinwand.getContext('2d');
+        ctx.fillStyle = UMLAND_FARBE;
+        ctx.fillRect(0, 0, groesse, groesse);
+        ctx.scale(groesse / breite, groesse / tiefe);
+        ctx.translate(-H.x0, -H.z0);
+
+        function umriss(punkte, schliessen) {
+            ctx.beginPath();
+            punkte.forEach(([x, z], i) => i ? ctx.lineTo(x, z) : ctx.moveTo(x, z));
+            if (schliessen) ctx.closePath();
+        }
+        umriss(D.grenze, true);
+        ctx.fillStyle = '#86ad5f';
+        ctx.fill();
+        const sortiert = D.flaechen.slice().sort((a, b) => FLAECHEN_EBENE[a.t] - FLAECHEN_EBENE[b.t]);
+        for (const f of sortiert) {
+            umriss(f.p, true);
+            ctx.fillStyle = auswahl(FLAECHEN_FARBEN[f.t]);
+            ctx.fill();
+        }
+        // Dunklerer Rand (Bankett) unter jeder Straße
+        ctx.lineCap = ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(70, 60, 40, 0.35)';
+        for (const s of D.strassen) {
+            ctx.lineWidth = s.w + 1.4;
+            umriss(s.p, false);
+            ctx.stroke();
+        }
+
+        const textur = new THREE.CanvasTexture(leinwand);
+        textur.anisotropy = HANDY ? 1 : renderer.capabilities.getMaxAnisotropy();
+        return textur;
+    }
 
     function gelaendeBauen() {
+        // Ebene unter dem tiefsten Punkt, sichtbar nur jenseits des Höhenrasters
         const aussen = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000),
-            new THREE.MeshLambertMaterial({ color: 0x8fa36b }));
+            new THREE.MeshLambertMaterial({ color: UMLAND_FARBE }));
         aussen.rotation.x = -Math.PI / 2;
-        aussen.position.y = -0.1;
-        bodenEbene(aussen, -6);
+        aussen.position.y = -1;
+        szene.add(aussen);
 
-        // Innerhalb eines Meshes zählt die Reihenfolge der Dreiecke: untere Ebenen zuerst
-        const boden = new GeometrieBauer();
-        boden.flaeche(D.grenze, 0, farbe('#86ad5f'));
-        const sortiert = D.flaechen.slice().sort((a, b) => FLAECHEN_HOEHE[a.t] - FLAECHEN_HOEHE[b.t]);
-        for (const f of sortiert) {
-            boden.flaeche(f.p, FLAECHEN_HOEHE[f.t], farbe(auswahl(FLAECHEN_FARBEN[f.t])));
+        // Gelände in Blöcken von 32 × 32 Zellen, damit Teile außerhalb des Blickfelds entfallen
+        const material = new THREE.MeshLambertMaterial({ map: gelaendeTextur() });
+        const BLOCK = 32;
+        const s = H.schritt;
+        for (let r0 = 0; r0 < H.zeilen - 1; r0 += BLOCK) {
+            for (let s0 = 0; s0 < H.spalten - 1; s0 += BLOCK) {
+                const r1 = Math.min(r0 + BLOCK, H.zeilen - 1), s1 = Math.min(s0 + BLOCK, H.spalten - 1);
+                const nS = s1 - s0 + 1, nR = r1 - r0 + 1;
+                const pos = new Float32Array(nS * nR * 3), nor = new Float32Array(nS * nR * 3);
+                const uv = new Float32Array(nS * nR * 2);
+                const n = new THREE.Vector3();
+                let k = 0;
+                for (let r = r0; r <= r1; r++) {
+                    for (let sp = s0; sp <= s1; sp++, k++) {
+                        pos[k * 3] = H.x0 + sp * s;
+                        pos[k * 3 + 1] = rasterHoehe(sp, r);
+                        pos[k * 3 + 2] = H.z0 + r * s;
+                        // Normale aus den Nachbarpunkten, damit es an Blockgrenzen keine Kanten gibt
+                        n.set(rasterHoehe(sp - 1, r) - rasterHoehe(sp + 1, r), 2 * s,
+                            rasterHoehe(sp, r - 1) - rasterHoehe(sp, r + 1)).normalize();
+                        nor.set([n.x, n.y, n.z], k * 3);
+                        uv[k * 2] = sp / (H.spalten - 1);
+                        uv[k * 2 + 1] = 1 - r / (H.zeilen - 1);
+                    }
+                }
+                // Diagonale a–c, passend zu hoehe(); Umlaufsinn so, dass die Oberseite sichtbar ist
+                const index = [];
+                for (let r = 0; r < nR - 1; r++) {
+                    for (let sp = 0; sp < nS - 1; sp++) {
+                        const a = r * nS + sp, b = a + 1, d = a + nS, c = d + 1;
+                        index.push(a, c, b, a, d, c);
+                    }
+                }
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+                geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+                geo.setIndex(index);
+                const block = new THREE.Mesh(geo, material);
+                block.receiveShadow = true;
+                block.renderOrder = -10;  // vor den Bändern auf dem Gelände zeichnen
+                szene.add(block);
+            }
         }
-        bodenEbene(boden.mesh(vertexMaterial()), -5);
 
-        // Halbtransparente Wand an der Ortsgrenze
+        // Halbtransparente Wand an der Ortsgrenze, in Stücken von höchstens 10 m dem Gelände folgend
         const wand = new GeometrieBauer();
         const gruen = farbe('#46c35a');
         for (let i = 0; i < D.grenze.length; i++) {
             const [ax, az] = D.grenze[i], [bx, bz] = D.grenze[(i + 1) % D.grenze.length];
-            wand.viereck([ax, 0, az], [bx, 0, bz], [bx, 4, bz], [ax, 4, az], gruen);
+            const teile = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 10));
+            for (let t = 0; t < teile; t++) {
+                const px = ax + (bx - ax) * t / teile, pz = az + (bz - az) * t / teile;
+                const qx = ax + (bx - ax) * (t + 1) / teile, qz = az + (bz - az) * (t + 1) / teile;
+                const hp = hoehe(px, pz), hq = hoehe(qx, qz);
+                wand.viereck([px, hp - 1, pz], [qx, hq - 1, qz], [qx, hq + 4, qz], [px, hp + 4, pz], gruen);
+            }
         }
         szene.add(wand.mesh(new THREE.MeshBasicMaterial({
             vertexColors: true, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
@@ -248,7 +381,7 @@
     function strassenBauen() {
         const gewaesser = new GeometrieBauer();
         const blau = farbe('#4f8fc0');
-        for (const g of D.gewaesser) gewaesser.band(g.p, g.w, 0.2, blau);
+        for (const g of D.gewaesser) gewaesser.band(g.p, g.w, 0.12, blau);
         bodenEbene(gewaesser.mesh(vertexMaterial()), -4);
 
         // Feldwege zuerst, damit befestigte Straßen an Kreuzungen oben liegen
@@ -258,8 +391,7 @@
         const linien = new GeometrieBauer();
         const weiss = farbe('#f2f2ee');
         for (const s of sortiert) {
-            const y = unbefestigt(s) ? 0.21 : 0.24;
-            bauer.band(s.p, s.w, y, farbe(STRASSEN_FARBE[s.t]));
+            bauer.band(s.p, s.w, unbefestigt(s) ? 0.15 : 0.18, farbe(STRASSEN_FARBE[s.t]));
 
             if (MITTELLINIE.has(s.t)) {
                 let strecke = 0;
@@ -270,8 +402,9 @@
                         const a = [ax + (bx - ax) * t / l, az + (bz - az) * t / l];
                         const b = [ax + (bx - ax) * (t + 3) / l, az + (bz - az) * (t + 3) / l];
                         const nx = -(bz - az) / l * 0.07, nz = (bx - ax) / l * 0.07;
-                        linien.viereck([a[0] + nx, 0.26, a[1] + nz], [b[0] + nx, 0.26, b[1] + nz],
-                            [b[0] - nx, 0.26, b[1] - nz], [a[0] - nx, 0.26, a[1] - nz], weiss);
+                        const p = GeometrieBauer.aufGelaende;
+                        linien.viereck(p(a[0] + nx, a[1] + nz, 0.22), p(b[0] + nx, b[1] + nz, 0.22),
+                            p(b[0] - nx, b[1] - nz, 0.22), p(a[0] - nx, a[1] - nz, 0.22), weiss);
                     }
                     strecke += l;
                 }
@@ -354,12 +487,20 @@
             const dachFarbe = farbe(istKirche ? '#3d3f44' : auswahl(DACH_FARBEN));
             const wandHoehe = istKirche ? 9 : dach === 'flat' ? g.h : Math.max(2.6, g.h - 1.5);
 
+            // Am Hang: Wände reichen unter den tiefsten Geländepunkt, die Etagen beginnen über dem höchsten
+            const boden = ring.map(([x, z]) => hoehe(x, z));
+            const unten = Math.min(...boden) - 0.5;
+            const erdgeschoss = Math.max(...boden);
+            const oben = erdgeschoss + wandHoehe;
+
             // Wände mit Sockel, Fenstern und Tür
             let laengsteKante = -1, laengsteLaenge = 0;
             for (let i = 0; i < ring.length; i++) {
-                const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % ring.length];
-                bauer.viereck([ax, 0, az], [bx, 0, bz], [bx, 0.5, bz], [ax, 0.5, az], sockelFarbe);
-                bauer.viereck([ax, 0.5, az], [bx, 0.5, bz], [bx, wandHoehe, bz], [ax, wandHoehe, az], wandFarbe);
+                const j = (i + 1) % ring.length;
+                const [ax, az] = ring[i], [bx, bz] = ring[j];
+                const sa = boden[i] + 0.5, sb = boden[j] + 0.5;
+                bauer.viereck([ax, unten, az], [bx, unten, bz], [bx, sb, bz], [ax, sa, az], sockelFarbe);
+                bauer.viereck([ax, sa, az], [bx, sb, bz], [bx, oben, bz], [ax, oben, az], wandFarbe);
                 const l = Math.hypot(bx - ax, bz - az);
                 if (l > laengsteLaenge) { laengsteLaenge = l; laengsteKante = i; }
 
@@ -372,7 +513,7 @@
                 const anzahl = Math.floor((l - 1) / 3);
                 const rand = (l - anzahl * 3) / 2 + 1;
                 for (let etage = 0; etage * 2.9 + 2.3 < wandHoehe; etage++) {
-                    const y0 = etage * 2.9 + 1.1, y1 = y0 + 1.2;
+                    const y0 = erdgeschoss + etage * 2.9 + 1.1, y1 = y0 + 1.2;
                     for (let k = 0; k < anzahl; k++) {
                         const t0 = rand + k * 3 - 0.5, t1 = t0 + 1;
                         if (i === laengsteKante && etage === 0 && k === 0) continue;
@@ -389,16 +530,18 @@
                 let nx = -uz, nz = ux;
                 if (punktInPolygon((ax + bx) / 2 + nx * 0.2, (az + bz) / 2 + nz * 0.2, ring)) { nx = -nx; nz = -nz; }
                 const t0 = l / 2 - 0.5, t1 = l / 2 + 0.5, ox = nx * 0.05, oz = nz * 0.05;
+                // Tür auf dem Gelände vor der Wand
+                const y0 = hoehe(ax + ux * l / 2 + nx, az + uz * l / 2 + nz), y1 = y0 + 2.1;
                 bauer.viereck(
-                    [ax + ux * t0 + ox, 0, az + uz * t0 + oz], [ax + ux * t1 + ox, 0, az + uz * t1 + oz],
-                    [ax + ux * t1 + ox, 2.1, az + uz * t1 + oz], [ax + ux * t0 + ox, 2.1, az + uz * t0 + oz], tuerFarbe);
+                    [ax + ux * t0 + ox, y0, az + uz * t0 + oz], [ax + ux * t1 + ox, y0, az + uz * t1 + oz],
+                    [ax + ux * t1 + ox, y1, az + uz * t1 + oz], [ax + ux * t0 + ox, y1, az + uz * t0 + oz], tuerFarbe);
             }
 
             // Dach
             if (dach === 'flat') {
-                bauer.flaeche(ring, wandHoehe, neben ? dachFarbe.clone().lerp(flachdachFarbe, 0.6) : flachdachFarbe);
+                bauer.flaeche(ring, oben, neben ? dachFarbe.clone().lerp(flachdachFarbe, 0.6) : flachdachFarbe);
             } else {
-                spitzdachBauen(bauer, rechteck, wandHoehe, dach, wandFarbe, dachFarbe);
+                spitzdachBauen(bauer, rechteck, oben, dach, wandFarbe, dachFarbe);
             }
 
             if (istKirche) kirchturmBauen(bauer, rechteck, wandFarbe, dachFarbe);
@@ -452,11 +595,12 @@
         const nordEnde = p(r.u0, vm, 0)[2] < p(r.u1, vm, 0)[2];
         const um = nordEnde ? r.u0 + s : r.u1 - s;
         const ecken = [[um - s, vm - s], [um + s, vm - s], [um + s, vm + s], [um - s, vm + s]];
-        const hoehe = 24, spitze = 34;
+        const unten = Math.min(...ecken.map(([u, v]) => { const q = p(u, v, 0); return hoehe(q[0], q[2]); })) - 0.5;
+        const traufe = unten + 24, spitze = unten + 34;
         for (let i = 0; i < 4; i++) {
             const [a0, b0] = ecken[i], [a1, b1] = ecken[(i + 1) % 4];
-            bauer.viereck(p(a0, b0, 0), p(a1, b1, 0), p(a1, b1, hoehe), p(a0, b0, hoehe), wandFarbe);
-            bauer.dreieck(p(a0, b0, hoehe), p(a1, b1, hoehe), p(um, vm, spitze), dachFarbe);
+            bauer.viereck(p(a0, b0, unten), p(a1, b1, unten), p(a1, b1, traufe), p(a0, b0, traufe), wandFarbe);
+            bauer.dreieck(p(a0, b0, traufe), p(a1, b1, traufe), p(um, vm, spitze), dachFarbe);
         }
         const ring = ecken.map(([u, v]) => { const q = p(u, v, 0); return [q[0], q[2]]; });
         for (let i = 0; i < 4; i++) {
@@ -522,34 +666,56 @@
         const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3();
         const gruenToene = ['#3f6b2d', '#4d7a33', '#5a8a3a', '#466f30', '#628f3e'].map(farbe);
 
+        // Bäume in Blöcken von 256 m, damit nur Blöcke im Blickfeld gezeichnet werden.
+        // Jeder Block bekommt eine eigene Hüllkugel, denn three.js kennt sonst nur die Grundform am Ursprung.
         function instanzen(geo, material, punkte, setzen) {
-            if (!punkte.length) return;
-            const mesh = new THREE.InstancedMesh(geo, material, punkte.length);
+            const bloecke = new Map();
             punkte.forEach((p, i) => {
-                setzen(p, i);
-                mesh.setMatrixAt(i, m);
-                if (material === kronenMaterial) mesh.setColorAt(i, auswahl(gruenToene));
+                const k = Math.floor(p[0] / 256) * 1000 + Math.floor(p[1] / 256);
+                if (!bloecke.has(k)) bloecke.set(k, []);
+                bloecke.get(k).push(i);
             });
-            mesh.castShadow = !HANDY;
-            szene.add(mesh);
+            const mitte = new THREE.Vector3();
+            for (const indizes of bloecke.values()) {
+                const blockGeo = geo.clone();
+                const mesh = new THREE.InstancedMesh(blockGeo, material, indizes.length);
+                mitte.set(0, 0, 0);
+                indizes.forEach((i, n) => {
+                    setzen(punkte[i], i);
+                    mesh.setMatrixAt(n, m);
+                    mitte.add(v.setFromMatrixPosition(m));
+                    if (material === kronenMaterial) mesh.setColorAt(n, auswahl(gruenToene));
+                });
+                mitte.divideScalar(indizes.length);
+                let radius = 0;
+                for (let n = 0; n < indizes.length; n++) {
+                    mesh.getMatrixAt(n, m);
+                    radius = Math.max(radius, mitte.distanceTo(v.setFromMatrixPosition(m)));
+                }
+                blockGeo.boundingSphere = new THREE.Sphere(mitte.clone(), radius + 15);
+                mesh.frustumCulled = true;  // bei InstancedMesh in three.js r149 standardmäßig aus
+                mesh.castShadow = !HANDY;
+                szene.add(mesh);
+            }
         }
 
         const stammPunkte = laub.concat(nadel);
         const hoehen = stammPunkte.map(() => 6 + zufall() * 7);
         instanzen(stammGeo, stammMaterial, stammPunkte, (p, i) => {
-            m.compose(v.set(p[0], 0, p[1]), q.identity(), s.set(1, hoehen[i] * 0.45, 1));
+            // Stamm etwas in den Boden, damit er am Hang nicht schwebt
+            m.compose(v.set(p[0], hoehe(p[0], p[1]) - 0.3, p[1]), q.identity(), s.set(1, hoehen[i] * 0.45 + 0.3, 1));
         });
         instanzen(laubGeo, kronenMaterial, laub, (p, i) => {
             const r = hoehen[i] * 0.32;
-            m.compose(v.set(p[0], hoehen[i] * 0.62, p[1]), q.identity(), s.set(r, r * 0.9, r));
+            m.compose(v.set(p[0], hoehe(p[0], p[1]) + hoehen[i] * 0.62, p[1]), q.identity(), s.set(r, r * 0.9, r));
         });
         instanzen(nadelGeo, kronenMaterial, nadel, (p, i) => {
             const h = hoehen[laub.length + i];
-            m.compose(v.set(p[0], h * 0.2, p[1]), q.identity(), s.set(h * 0.22, h, h * 0.22));
+            m.compose(v.set(p[0], hoehe(p[0], p[1]) + h * 0.2, p[1]), q.identity(), s.set(h * 0.22, h, h * 0.22));
         });
         instanzen(laubGeo, kronenMaterial, busch, p => {
             const r = 0.8 + zufall() * 0.9;
-            m.compose(v.set(p[0], 0.5, p[1]), q.identity(), s.set(r, r * 0.7, r));
+            m.compose(v.set(p[0], hoehe(p[0], p[1]) + 0.5, p[1]), q.identity(), s.set(r, r * 0.7, r));
         });
     }
 
@@ -568,7 +734,7 @@
             ctx.textBaseline = 'middle';
             ctx.fillText(o.n, 256, 50, 490);
             const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(leinwand), fog: false }));
-            sprite.position.set(o.p[0], 14, o.p[1]);
+            sprite.position.set(o.p[0], hoehe(o.p[0], o.p[1]) + 14, o.p[1]);
             sprite.scale.set(12, 2.25, 1);
             szene.add(sprite);
         }
@@ -635,7 +801,9 @@
         return [beste.qx, beste.qz];
     }
 
-    const spieler = { x: D.start[0], z: D.start[1], y: 0, vy: 0, richtung: Math.PI, tempo: 0, schritt: 0 };
+    const spieler = {
+        x: D.start[0], z: D.start[1], y: 0, vy: 0, amBoden: true, richtung: Math.PI, tempo: 0, schritt: 0,
+    };
     const parameter = new URLSearchParams(location.search);
     if (parameter.has('lat') && parameter.has('lon')) {
         const u = D.ursprung;
@@ -643,6 +811,7 @@
         const z = -(parseFloat(parameter.get('lat')) - u.lat) * u.mProGradLat;
         if (isFinite(x) && isFinite(z)) [spieler.x, spieler.z] = freiePosition(x, z);
     }
+    spieler.y = hoehe(spieler.x, spieler.z);
 
     // ---------- Steuerung ----------
 
@@ -745,8 +914,9 @@
 
     function zuOrtSpringen(o) {
         [spieler.x, spieler.z] = freiePosition(o.p[0], o.p[1]);
-        spieler.y = 0;
+        spieler.y = hoehe(spieler.x, spieler.z);
         spieler.vy = 0;
+        spieler.amBoden = true;
     }
 
     // ---------- Bewegung und Kollision ----------
@@ -811,10 +981,22 @@
         spieler.z = nz;
 
         // Springen und Schwerkraft
-        if (tasten.has('Space') && spieler.y === 0) spieler.vy = 5;
-        spieler.vy -= 15 * dt;
-        spieler.y = Math.max(0, spieler.y + spieler.vy * dt);
-        if (spieler.y === 0) spieler.vy = Math.max(0, spieler.vy);
+        // Gelände, Springen und Schwerkraft. Am Boden haftet die Figur bergab, statt kurz zu schweben.
+        const boden = hoehe(spieler.x, spieler.z);
+        if (spieler.amBoden && spieler.y - boden < 0.6) spieler.y = boden;
+        spieler.amBoden = spieler.y <= boden + 0.01;
+        if (spieler.amBoden) {
+            spieler.y = boden;
+            spieler.vy = 0;
+            if (tasten.has('Space')) {
+                spieler.vy = 5;
+                spieler.amBoden = false;
+            }
+        }
+        if (!spieler.amBoden) {
+            spieler.vy -= 15 * dt;
+            spieler.y = Math.max(boden, spieler.y + spieler.vy * dt);
+        }
 
         // Figur und Laufanimation
         figur.position.set(spieler.x, spieler.y, spieler.z);
@@ -836,13 +1018,13 @@
     function kameraNachfuehren() {
         const ziel = new THREE.Vector3(spieler.x, spieler.y + 1.6, spieler.z);
         const c = Math.cos(kam.neigung);
-        kamera.position.set(
-            ziel.x + Math.sin(kam.gier) * c * kam.abstand,
-            Math.max(0.5, ziel.y + Math.sin(kam.neigung) * kam.abstand),
-            ziel.z + Math.cos(kam.gier) * c * kam.abstand);
+        const kx = ziel.x + Math.sin(kam.gier) * c * kam.abstand;
+        const kz = ziel.z + Math.cos(kam.gier) * c * kam.abstand;
+        // Kamera nicht in einen Hang hinter der Figur tauchen lassen
+        kamera.position.set(kx, Math.max(hoehe(kx, kz) + 0.5, ziel.y + Math.sin(kam.neigung) * kam.abstand), kz);
         kamera.lookAt(ziel);
 
-        sonne.target.position.set(spieler.x, 0, spieler.z);
+        sonne.target.position.set(spieler.x, spieler.y, spieler.z);
         sonne.position.copy(sonne.target.position).add(sonnenVersatz);
     }
 
@@ -975,5 +1157,13 @@
     schleife();
 
     // Für Tests und spätere Erweiterungen (z. B. Festplanung)
-    window.rundgang = { spieler, kam, tasten, stick, szene, inGebaeude, zuOrtSpringen, schritt: bewegen };
+    window.rundgang = {
+        spieler, kam, tasten, stick, szene, kamera, renderer, inGebaeude, zuOrtSpringen, hoehe, schritt: bewegen,
+        // Ein einzelnes Bild zeichnen, auch wenn die Animationsschleife gerade pausiert
+        bild() {
+            kameraNachfuehren();
+            minikarteZeichnen();
+            renderer.render(szene, kamera);
+        },
+    };
 })();
