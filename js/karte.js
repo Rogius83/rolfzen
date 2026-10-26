@@ -36,7 +36,8 @@ const orte = [
     { name: 'Kath. Kirche St. Marien', lat: 51.84788, lon: 9.1450246 },
     { name: 'Gaststätte Zum Körter', lat: 51.8475511, lon: 9.1454061 },
     { name: 'Freiwillige Feuerwehr, LG Rolfzen', lat: 51.8459925, lon: 9.1429903 },
-    { name: 'Parkplatz', lat: 51.8485358, lon: 9.1452456 },
+    { name: 'Schützenplatz', lat: 51.84569, lon: 9.141994 },
+    { name: 'Offizierhaus', lat: 51.8457537, lon: 9.1423532 },
     { name: 'Sportplatz SpVg. Grün-Weiß 94 Rolfzen/Sommersell', lat: 51.8420031, lon: 9.1401349 }
 ];
 
@@ -44,8 +45,17 @@ const orteEbene = L.layerGroup(
     orte.map(o => L.marker([o.lat, o.lon], { title: o.name }).bindPopup(o.name))
 ).addTo(karte);
 
-// Platzhalter für die spätere Schützenfest-Planung
+// Schützenfest-Planung (Daten aus js/festplanung.js)
 const festplanung = L.layerGroup().addTo(karte);
+{
+    const z = ROLFZEN_FEST.zelt;
+    const mProGradLat = 111320, mProGradLon = 111320 * Math.cos(z.lat * Math.PI / 180);
+    const ecken = festRechteck(z.laenge, z.breite, z.ausrichtung)
+        .map(([x, zs]) => [z.lat - zs / mProGradLat, z.lon + x / mProGradLon]);
+    L.polygon(ecken, { color: '#b8860b', weight: 2, fillColor: '#fffbe8', fillOpacity: 0.8 })
+        .bindPopup(`<b>${z.name}</b><br>${z.laenge} × ${z.breite} m`)
+        .addTo(festplanung);
+}
 
 L.control.layers(
     { 'Straßenkarte': osm, 'Luftbild': luftbild, 'Topografisch': topo },

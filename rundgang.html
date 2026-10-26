@@ -26,14 +26,28 @@
             <tr><td>Q / E</td><td>Kamera drehen</td></tr>
             <tr><td>Maus ziehen</td><td>Umsehen</td></tr>
             <tr><td>Mausrad</td><td>Kamera-Abstand</td></tr>
-            <tr><td>1 – 5</td><td>Zu einem Ort springen</td></tr>
+            <tr><td>1 – 6</td><td>Zu einem Ort springen</td></tr>
             <tr><td>H</td><td>Hilfe ein/aus</td></tr>
         </table>
         <ol id="ortsliste"></ol>
         <a href="index.html">← Zur Karte</a>
     </div>
 
+    <div id="fest">
+        <b>Schützenfest</b>
+        <label for="koenig-adresse">Schützenkönig wohnt in</label>
+        <select id="koenig-adresse"></select>
+        <div class="knoepfe">
+            <button id="umzug-knopf" type="button">Umzug starten</button>
+            <button id="umzug-hin" type="button">Zum Umzug</button>
+        </div>
+        <label class="schalter"><input type="checkbox" id="zeitraffer"> Zeitraffer (4×)</label>
+        <label class="schalter"><input type="checkbox" id="musik" checked> Blasmusik</label>
+        <div id="umzug-status">Bereit</div>
+    </div>
+
     <button id="hilfe-knopf" type="button" aria-label="Hilfe ein- oder ausblenden">?</button>
+    <button id="fest-knopf" type="button" aria-label="Schützenfest ein- oder ausblenden">Fest</button>
     <div id="joystick"><div id="joystick-knopf"></div></div>
     <button id="sprung-knopf" type="button">Springen</button>
 
@@ -53,6 +67,8 @@
             integrity="sha384-RRHfJ6w1mTlKUBMYT/hvnRiOzEB/vyRV3DrQOseb6oYfvaZSfdd0byS4bHps0k2R" crossorigin="anonymous"></script>
     <script src="js/rolfzen-3d-daten.js"></script>
     <script src="js/rolfzen-hoehen.js"></script>
+    <script src="js/festplanung.js"></script>
     <script src="js/rundgang.js"></script>
+    <script src="js/umzug.js"></script>
 </body>
 </html>

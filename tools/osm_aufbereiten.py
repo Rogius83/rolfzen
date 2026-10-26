@@ -51,9 +51,18 @@ ORTE = [
     ('Kath. Kirche St. Marien', 51.84788, 9.1450246),
     ('Gaststätte Zum Körter', 51.8475511, 9.1454061),
     ('Freiwillige Feuerwehr, LG Rolfzen', 51.8459925, 9.1429903),
-    ('Parkplatz', 51.8485358, 9.1452456),
+    # Nicht in OSM; Lage nach Angabe aus dem Dorf (westlich der Kreuzung Rosenstraße/Stoppelbergstraße)
+    ('Schützenplatz', 51.84569, 9.141994),
+    # Kleines Gebäude östlich des Schützenplatzes (Mitte des OSM-Grundrisses)
+    ('Offizierhaus', 51.8457537, 9.1423532),
     ('Sportplatz Grün-Weiß 94', 51.8420031, 9.1401349),
 ]
+
+
+def natuerlich(text):
+    """Sortierschlüssel, damit 5 < 5a < 10."""
+    zahl = ''.join(z for z in text if z.isdigit())
+    return (int(zahl) if zahl else 0, text)
 
 
 def projizieren(lat, lon):
@@ -167,6 +176,7 @@ def main(osm_pfad, grenze_pfad, ausgabe_pfad):
                               for lon, lat in grenze_geo['features'][0]['geometry']['coordinates'][0]])
 
     gebaeude, strassen, flaechen, gewaesser, baeume, hecken = [], [], [], [], [], []
+    adressen = {}
 
     for e in osm['elements']:
         tags = e.get('tags', {})
@@ -191,6 +201,15 @@ def main(osm_pfad, grenze_pfad, ausgabe_pfad):
             for r in ringe:
                 ring = ring_bereinigen(r)
                 if ring and punkt_in_polygon(schwerpunkt(ring), grenze):
+                    # Adresse; bei mehreren Gebäuden gleicher Adresse (Haus und Garage) zählt das größte
+                    strasse = tags.get('addr:street') or tags.get('addr:place')
+                    nummer = tags.get('addr:housenumber')
+                    if strasse and nummer:
+                        groesse = abs(flaeche_vorzeichen(ring))
+                        alt = adressen.get((strasse, nummer))
+                        if not alt or groesse > alt[0]:
+                            m = schwerpunkt(ring)
+                            adressen[(strasse, nummer)] = (groesse, [round(m[0], 1), round(m[1], 1)])
                     eintrag = {'p': ring, 'h': round(gebaeude_hoehe(tags), 1), 't': tags['building']}
                     if 'roof:shape' in tags:
                         eintrag['d'] = tags['roof:shape']
@@ -247,6 +266,8 @@ def main(osm_pfad, grenze_pfad, ausgabe_pfad):
         'baeume': baeume,
         'hecken': hecken,
         'orte': [{'n': n, 'p': projizieren(lat, lon)} for n, lat, lon in ORTE],
+        'adressen': [{'s': s, 'h': h, 'p': adressen[(s, h)][1]}
+                     for s, h in sorted(adressen, key=lambda a: (a[0], natuerlich(a[1])))],
         'start': start,
     }
     with open(ausgabe_pfad, 'w', encoding='utf8') as f:

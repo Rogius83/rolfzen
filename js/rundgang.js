@@ -610,7 +610,96 @@
         }
     }
 
+    // ---------- Schützenzelt (Daten aus js/festplanung.js) ----------
+
+    function lokal(lat, lon) {
+        const u = D.ursprung;
+        return [(lon - u.lon) * u.mProGradLon, -(lat - u.lat) * u.mProGradLat];
+    }
+
+    const zelt = (() => {
+        const z = ROLFZEN_FEST.zelt;
+        const [mx, mz] = lokal(z.lat, z.lon);
+        const w = z.ausrichtung * Math.PI / 180;
+        const ux = Math.sin(w), uz = -Math.cos(w), vx = -uz, vz = ux;
+        const ring = festRechteck(z.laenge, z.breite, z.ausrichtung).map(([x, zz]) => [mx + x, mz + zz]);
+        // Eingang in der Mitte der Stirnseite in Richtung der Längsachse (Süden, zum Weg)
+        const eingang = [mx + ux * z.laenge / 2, mz + uz * z.laenge / 2];
+        return { ...z, mx, mz, ux, uz, vx, vz, ring, eingang, eingangBreite: 4 };
+    })();
+
+    function zeltBauen() {
+        const bauer = new GeometrieBauer();
+        const { mx, mz, ux, uz, vx, vz, laenge, breite } = zelt;
+        const p = (u, v, y) => [mx + u * ux + v * vx, y, mz + u * uz + v * vz];
+        const bodenBei = (u, v) => { const q = p(u, v, 0); return hoehe(q[0], q[2]); };
+        const weiss = farbe('#f4f3ee'), gruen = farbe('#2f5a34'), holz = farbe('#8a6a45'), theke = farbe('#6b4a2e');
+        const boden = zelt.ring.map(([x, z]) => hoehe(x, z));
+        const unten = Math.min(...boden) - 0.3, oben = Math.max(...boden) + 3;
+        const l2 = laenge / 2, b2 = breite / 2, t2 = zelt.eingangBreite / 2;
+
+        // Wände; an der Stirnseite u = +l2 bleibt der Eingang offen (bis 2,5 m Höhe)
+        const wand = (a, b, y0, y1, f) => bauer.viereck(p(a[0], a[1], y0), p(b[0], b[1], y0), p(b[0], b[1], y1), p(a[0], a[1], y1), f);
+        wand([-l2, -b2], [l2, -b2], unten, oben, weiss);
+        wand([-l2, b2], [l2, b2], unten, oben, weiss);
+        wand([-l2, -b2], [-l2, b2], unten, oben, weiss);
+        wand([l2, -b2], [l2, -t2], unten, oben, weiss);
+        wand([l2, t2], [l2, b2], unten, oben, weiss);
+        wand([l2, -t2], [l2, t2], bodenBei(l2, 0) + 2.5, oben, weiss);
+        // Grünes Band an der Traufe
+        for (const [a, b] of [[[-l2, -b2], [l2, -b2]], [[-l2, b2], [l2, b2]], [[-l2, -b2], [-l2, b2]], [[l2, -b2], [l2, b2]]]) {
+            const f = 1.003;
+            wand([a[0] * f, a[1] * f], [b[0] * f, b[1] * f], oben - 0.5, oben, gruen);
+        }
+        // Dach über dem Rechteck (Längsachse u)
+        const uc = mx * ux + mz * uz, vc = mx * vx + mz * vz;
+        spitzdachBauen(bauer, { ux, uz, vx, vz, u0: uc - l2, u1: uc + l2, v0: vc - b2, v1: vc + b2 },
+            oben, 'gabled', weiss, weiss);
+
+        // Quader in Zelt-Koordinaten (u, v), Unterkante auf dem Gelände
+        function quader(u, v, lu, lv, h, f, y) {
+            const y0 = y !== undefined ? y : bodenBei(u, v), y1 = y0 + h;
+            const e = [[u - lu / 2, v - lv / 2], [u + lu / 2, v - lv / 2], [u + lu / 2, v + lv / 2], [u - lu / 2, v + lv / 2]];
+            for (let i = 0; i < 4; i++) {
+                const a = e[i], b = e[(i + 1) % 4];
+                bauer.viereck(p(a[0], a[1], y0), p(b[0], b[1], y0), p(b[0], b[1], y1), p(a[0], a[1], y1), f);
+            }
+            bauer.viereck(p(e[0][0], e[0][1], y1), p(e[1][0], e[1][1], y1), p(e[2][0], e[2][1], y1), p(e[3][0], e[3][1], y1), f);
+        }
+        // Bierzeltgarnituren in drei Reihen, Theke an der Nordseite
+        for (const v of [-4.5, 0, 4.5]) {
+            for (let u = -l2 + 5; u < l2 - 4; u += 2.6) {
+                const y = bodenBei(u, v);
+                quader(u, v, 2.2, 0.6, 0.75, holz, y);
+                quader(u, v - 0.65, 2.2, 0.25, 0.45, holz, y);
+                quader(u, v + 0.65, 2.2, 0.25, 0.45, holz, y);
+            }
+        }
+        quader(-l2 + 1.2, 0, 1, 6, 1.1, theke);
+        // Fahnenmasten links und rechts vom Eingang
+        for (const v of [-t2 - 1.5, t2 + 1.5]) {
+            quader(l2 + 1.5, v, 0.15, 0.15, 8, farbe('#dddddd'));
+            const y = bodenBei(l2 + 1.5, v) + 6.6;
+            quader(l2 + 1.5, v + (v > 0 ? 0.8 : -0.8), 0.05, 1.5, 1.0, v > 0 ? weiss : gruen, y);
+        }
+
+        const mesh = bauer.mesh(vertexMaterial());
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        szene.add(mesh);
+
+        // Kollision: alle Wände außer dem Eingang
+        const kanten = [[[-l2, -b2], [l2, -b2]], [[-l2, b2], [l2, b2]], [[-l2, -b2], [-l2, b2]],
+            [[l2, -b2], [l2, -t2]], [[l2, t2], [l2, b2]]];
+        for (const [a, b] of kanten) {
+            const [ax, , az] = p(a[0], a[1], 0), [bx, , bz] = p(b[0], b[1], 0);
+            gebaeudeRaster.einfuegen({ ax, az, bx, bz, ring: zelt.ring },
+                Math.min(ax, bx) - 1, Math.min(az, bz) - 1, Math.max(ax, bx) + 1, Math.max(az, bz) + 1);
+        }
+    }
+
     function inGebaeude(x, z) {
+        if (punktInPolygon(x, z, zelt.ring)) return true;
         for (const k of gebaeudeRaster.abfragen(x, z)) {
             if (punktInPolygon(x, z, k.ring)) return true;
         }
@@ -783,6 +872,7 @@
     gelaendeBauen();
     strassenBauen();
     gebaeudeBauen();
+    zeltBauen();     // vor den Bäumen, damit keine Bäume im Zelt wachsen
     baeumeBauen();
     beschriftungenBauen();
     const figur = figurBauen();
@@ -819,6 +909,8 @@
     const kam = { gier: 0, neigung: 0.32, abstand: 6 };
 
     window.addEventListener('keydown', e => {
+        // In Auswahlfeldern und auf Knöpfen keine Spieltasten (sonst ändert W die Adresse)
+        if (['SELECT', 'INPUT', 'BUTTON'].includes(e.target.tagName)) return;
         tasten.add(e.code);
         if (e.code === 'KeyH') document.getElementById('hilfe').hidden = !document.getElementById('hilfe').hidden;
         const nr = parseInt(e.key, 10);
@@ -1080,6 +1172,13 @@
             pfad(g.p, true);
             mk.fill();
         });
+        pfad(zelt.ring, true);
+        mk.fillStyle = '#fbf6e2';
+        mk.fill();
+        mk.strokeStyle = '#b8860b';
+        mk.lineWidth = 1;
+        mk.stroke();
+        for (const zeichnen of erweiterungen.minikarte) zeichnen(mk, MK_MASSSTAB);
         mk.strokeStyle = '#1f5130';
         mk.lineWidth = 3 / MK_MASSSTAB;
         mk.setLineDash([8, 5]);
@@ -1120,6 +1219,9 @@
         mk.fillText('N', nx, nz + 1);
     }
 
+    // Erweiterungen wie der Schützenumzug (js/umzug.js) hängen sich hier ein
+    const erweiterungen = { proBild: [], minikarte: [] };
+
     const ortsname = document.getElementById('ortsname');
     let ortsnameZeit = 0;
 
@@ -1141,6 +1243,7 @@
         const dt = Math.min(uhr.getDelta(), 0.05);
         groesseAnpassen();
         bewegen(dt);
+        for (const aktualisieren of erweiterungen.proBild) aktualisieren(dt);
         kameraNachfuehren();
         // Auf dem Handy nur etwa zehnmal pro Sekunde neu zeichnen
         minikarteZeit -= dt;
@@ -1156,8 +1259,9 @@
     document.getElementById('laden').remove();
     schleife();
 
-    // Für Tests und spätere Erweiterungen (z. B. Festplanung)
+    // Für Tests und Erweiterungen (z. B. Schützenumzug)
     window.rundgang = {
+        D, HANDY, zelt, erweiterungen, lokal, naechsterPunktAufStrecke,
         spieler, kam, tasten, stick, szene, kamera, renderer, inGebaeude, zuOrtSpringen, hoehe, schritt: bewegen,
         // Ein einzelnes Bild zeichnen, auch wenn die Animationsschleife gerade pausiert
         bild() {

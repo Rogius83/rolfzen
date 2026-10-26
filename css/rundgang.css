@@ -114,10 +114,92 @@ body {
     border-radius: 4px;
 }
 
+/* ---------- Schützenfest ---------- */
+
+#fest {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 240px;
+    padding: 10px 14px;
+    background: rgba(20, 30, 20, 0.78);
+    color: #fff;
+    font-size: 13px;
+    border-radius: 6px;
+}
+
+#fest select {
+    width: 100%;
+    padding: 4px;
+    font-size: 13px;
+}
+
+#fest .knoepfe {
+    display: flex;
+    gap: 6px;
+}
+
+#fest button {
+    flex: 1;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: #ffd23f;
+    color: #1f5130;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+#fest button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+#fest button#umzug-hin {
+    background: #e8efe6;
+}
+
+#fest .schalter {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+#umzug-status {
+    color: #ffd76a;
+    font-weight: 600;
+}
+
 /* ---------- Handy-Modus ---------- */
 
-#hilfe-knopf, #joystick, #sprung-knopf, body.handy .nur-pc, body:not(.handy) .nur-handy {
+#hilfe-knopf, #fest-knopf, #joystick, #sprung-knopf, body.handy .nur-pc, body:not(.handy) .nur-handy {
     display: none;
+}
+
+/* Unter der Minikarte, damit Karte und Ortsname frei bleiben */
+body.handy #fest {
+    top: calc(184px + env(safe-area-inset-top, 0px));
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    right: auto;
+    width: min(320px, calc(100vw - 52px));
+}
+
+body.handy #fest-knopf {
+    display: block;
+    position: absolute;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    left: calc(60px + env(safe-area-inset-left, 0px));
+    height: 40px;
+    padding: 0 12px;
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    border-radius: 20px;
+    background: rgba(20, 30, 20, 0.72);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
 }
 
 body.handy #hilfe-knopf {
