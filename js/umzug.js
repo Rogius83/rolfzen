@@ -835,6 +835,7 @@
             if (zustand.sKopf >= ende) {
                 zustand.phase = zustand.phase === 'marsch1' ? 'abholen' : 'angekommen';
                 zustand.zeit = 0;
+                if (zustand.phase === 'angekommen') gloriaSpielen();
             }
         } else if (zustand.phase === 'abholen') {
             let beideDa = true;
@@ -970,6 +971,7 @@
             musik.takt = 0;
             clearInterval(musik.timer);
             musik.timer = setInterval(() => { try { planen(); } catch (fehler) { musikStoppen(); } }, 50);
+            gloriaLaden();
         } catch (fehler) {
             musik.ctx = null;
         }
@@ -979,16 +981,59 @@
         clearInterval(musik.timer);
         musik.timer = null;
         if (musik.haupt) musik.haupt.gain.value = 0;
+        gloriaStoppen();
     }
 
-    // Lautstärke nach Entfernung zur Kapelle; gespielt wird beim Marschieren und beim Abholen
+    // Bei Ankunft am Zelt: „Preußens Gloria“ (Gottfried Piefke), Großes Odeon-Orchester 1927,
+    // gemeinfrei, Internet Archive (Great 78 Project); die ersten 30 Sekunden, am Ende ausgeblendet
+    const gloria = { puffer: null, laden: null, quelle: null, lautstaerke: null };
+
+    function gloriaLaden() {
+        if (gloria.puffer || gloria.laden || !musik.ctx) return;
+        gloria.laden = fetch('musik/preussens-gloria.mp3')
+            .then(antwort => antwort.arrayBuffer())
+            .then(daten => new Promise((ok, fehler) => musik.ctx.decodeAudioData(daten, ok, fehler)))
+            .then(puffer => { gloria.puffer = puffer; })
+            .catch(() => { gloria.laden = null; });
+    }
+
+    function gloriaSpielen() {
+        if (!zustand.musik || !musik.ctx || !gloria.puffer) return;
+        gloriaStoppen();
+        const c = musik.ctx, jetzt = c.currentTime, dauer = gloria.puffer.duration;
+        const quelle = c.createBufferSource(), ausblenden = c.createGain(), lautstaerke = c.createGain();
+        quelle.buffer = gloria.puffer;
+        ausblenden.gain.setValueAtTime(1, jetzt + Math.max(0, dauer - 2));
+        ausblenden.gain.linearRampToValueAtTime(0, jetzt + dauer);
+        lautstaerke.gain.value = 0;
+        quelle.connect(ausblenden);
+        ausblenden.connect(lautstaerke);
+        lautstaerke.connect(c.destination);
+        quelle.onended = () => { if (gloria.quelle === quelle) gloria.quelle = null; };
+        quelle.start(jetzt);
+        gloria.quelle = quelle;
+        gloria.lautstaerke = lautstaerke;
+    }
+
+    function gloriaStoppen() {
+        if (gloria.quelle) {
+            try { gloria.quelle.stop(); } catch (fehler) { /* schon beendet */ }
+            gloria.quelle = null;
+        }
+    }
+
+    // Lautstärke nach Entfernung zur Kapelle; der Marsch spielt beim Marschieren und Abholen,
+    // „Preußens Gloria“ bei der Ankunft am Zelt
     function musikLautstaerke() {
-        if (!musik.haupt || !musik.timer) return;
-        const spielt = ['marsch1', 'abholen', 'marsch2'].includes(zustand.phase) && zustand.musik;
+        if (!musik.ctx) return;
         const kapellmeister = personen[5];
         const d = Math.hypot(kapellmeister.x - R.spieler.x, kapellmeister.z - R.spieler.z);
-        const ziel = spielt ? 0.35 * Math.max(0, 1 - d / 300) : 0;
-        musik.haupt.gain.setTargetAtTime(ziel, musik.ctx.currentTime, 0.3);
+        const nah = Math.max(0, 1 - d / 300);
+        if (musik.haupt && musik.timer) {
+            const spielt = ['marsch1', 'abholen', 'marsch2'].includes(zustand.phase) && zustand.musik;
+            musik.haupt.gain.setTargetAtTime(spielt ? 0.35 * nah : 0, musik.ctx.currentTime, 0.3);
+        }
+        if (gloria.quelle) gloria.lautstaerke.gain.setTargetAtTime(0.8 * nah, musik.ctx.currentTime, 0.2);
     }
 
     // ---------- Bedienfeld ----------
@@ -1097,5 +1142,6 @@
         zustand, personen, adressen, routePlanen, starten, stoppen, aktualisieren, adresseWaehlen, wegSuchen, zeltZugang,
         get zuschauer() { return zuschauer; },
         get feuerwehr() { return feuerwehr; },
+        gloria, musik,
     };
 })();
