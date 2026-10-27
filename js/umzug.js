@@ -314,6 +314,21 @@
         return { strasse, tuer, blick: Math.atan2(-dx, -dz), quer: [-dz, dx] };
     }
 
+    // „Preußens Gloria“ setzt kurz vor dem Feuerwehrhaus ein: 15 m vor der Stelle nach dem Abholen,
+    // an der der Zug dem Feuerwehrhaus am nächsten kommt. Führt der Weg nicht dort vorbei (über 30 m),
+    // setzt die Musik 50 m vor dem Zelt ein.
+    const feuerwehrhaus = D.orte.find(o => o.n.includes('Feuerwehr')).p;
+    function gloriaEinsatz(pfad, sKoenig) {
+        let beste = null;
+        for (let s = sKoenig; s <= pfad.gesamt; s += 1) {
+            const [x, z] = pfad.punkt(s);
+            const d = Math.hypot(x - feuerwehrhaus[0], z - feuerwehrhaus[1]);
+            if (!beste || d < beste.d) beste = { s, d };
+        }
+        if (beste && beste.d < 30) return Math.max(sKoenig, beste.s - 15);
+        return Math.max(sKoenig, pfad.gesamt - 50);
+    }
+
     // null, wenn die Adresse innerhalb der Ortsgrenze nicht über Straßen erreichbar ist
     // (einzelne Höfe, deren Zufahrt außerhalb von Rolfzen verläuft)
     function routePlanen(adresse) {
@@ -322,8 +337,8 @@
         const weg2 = weg1 && wegSuchen(haus.strasse, zeltAndock);
         if (!weg1 || !weg2) return null;
         const pfad = new Pfad(weg1.concat(weg2.slice(1), zeltZugang.weg));
-        const sKoenig = new Pfad(weg1).gesamt;
-        return { haus, pfad, sKoenig: Math.min(sKoenig, pfad.gesamt) };
+        const sKoenig = Math.min(new Pfad(weg1).gesamt, pfad.gesamt);
+        return { haus, pfad, sKoenig, sGloria: gloriaEinsatz(pfad, sKoenig) };
     }
 
     // ---------- Teilnehmer und Formation ----------
@@ -783,6 +798,8 @@
         }
         zustand.route = route;
         zuschauer = zuschauerPlanen(route);
+        zustand.gloriaGespielt = false;
+        zustand.liedGespielt = false;
         feuerwehrAufstellen(route);
         zustand.sKopf = 0;
         zustand.zeit = 0;
@@ -832,10 +849,18 @@
         } else if (zustand.phase === 'marsch1' || zustand.phase === 'marsch2') {
             const ende = zustand.phase === 'marsch1' ? route.sKoenig + AB_KOENIG : route.pfad.gesamt;
             zustand.sKopf = Math.min(ende, zustand.sKopf + TEMPO * dt);
+            // Kurz vor dem Königspaar: 25 m bevor der Zug zum Abholen hält
+            if (zustand.phase === 'marsch1' && !zustand.liedGespielt && zustand.sKopf >= ende - 25) {
+                zustand.liedGespielt = true;
+                liedSpielen(LIED_HOCH_SOLL_ER_LEBEN);
+            }
+            if (zustand.phase === 'marsch2' && !zustand.gloriaGespielt && zustand.sKopf >= route.sGloria) {
+                zustand.gloriaGespielt = true;
+                gloriaSpielen();
+            }
             if (zustand.sKopf >= ende) {
                 zustand.phase = zustand.phase === 'marsch1' ? 'abholen' : 'angekommen';
                 zustand.zeit = 0;
-                if (zustand.phase === 'angekommen') gloriaSpielen();
             }
         } else if (zustand.phase === 'abholen') {
             let beideDa = true;
@@ -889,7 +914,7 @@
     ];
     const hz = n => 440 * Math.pow(2, (n - 69) / 12);
 
-    function ton(art, frequenz, zeit, dauer, lautstaerke) {
+    function ton(art, frequenz, zeit, dauer, lautstaerke, ausgang = musik.haupt) {
         const c = musik.ctx;
         const o = c.createOscillator(), g = c.createGain();
         o.type = art;
@@ -897,7 +922,6 @@
         g.gain.setValueAtTime(0, zeit);
         g.gain.linearRampToValueAtTime(lautstaerke, zeit + 0.02);
         g.gain.exponentialRampToValueAtTime(0.001, zeit + dauer);
-        let ziel = g;
         if (art === 'sawtooth') {
             const f = c.createBiquadFilter();
             f.type = 'lowpass';
@@ -906,9 +930,39 @@
         } else {
             o.connect(g);
         }
-        ziel.connect(musik.haupt);
+        g.connect(ausgang);
         o.start(zeit);
         o.stop(zeit + dauer + 0.05);
+    }
+
+    // „Hoch soll er leben“ (Noten aus js/lieder.js) kurz vor dem Königspaar, gespielt von der Kapelle:
+    // Melodie wie Trompete, Begleitung wie Horn, Bass wie Tuba
+    const KLANG = { melodie: ['sawtooth', 0.16], begleitung: ['square', 0.04], bass: ['triangle', 0.45] };
+    const lied = { ausgang: null, ende: 0 };
+
+    function liedSpielen(daten) {
+        if (!zustand.musik || !musik.ctx) return;
+        liedStoppen();
+        const c = musik.ctx, start = c.currentTime + 0.1;
+        lied.ausgang = c.createGain();
+        lied.ausgang.gain.value = 0;
+        lied.ausgang.connect(c.destination);
+        for (const spur of daten.spuren) {
+            const [art, laut] = KLANG[spur.klang];
+            for (const [beginn, dauer, tonhoehe, staerke] of spur.noten) {
+                ton(art, hz(tonhoehe), start + beginn, Math.max(0.1, dauer), laut * staerke / 127, lied.ausgang);
+            }
+        }
+        lied.ende = start + daten.dauer + 0.5;
+    }
+
+    const liedLaeuft = () => lied.ausgang && musik.ctx && musik.ctx.currentTime < lied.ende;
+
+    function liedStoppen() {
+        if (lied.ausgang) {
+            lied.ausgang.disconnect();
+            lied.ausgang = null;
+        }
     }
 
     function trommel(gross, zeit) {
@@ -982,10 +1036,12 @@
         musik.timer = null;
         if (musik.haupt) musik.haupt.gain.value = 0;
         gloriaStoppen();
+        liedStoppen();
     }
 
-    // Bei Ankunft am Zelt: „Preußens Gloria“ (Gottfried Piefke), Großes Odeon-Orchester 1927,
-    // gemeinfrei, Internet Archive (Great 78 Project); die ersten 30 Sekunden, am Ende ausgeblendet
+    // Kurz vor dem Feuerwehrhaus: „Preußens Gloria“ (Gottfried Piefke), Berliner Harmonie-Orchester
+    // unter Franz von Blon, restaurierte Schellackaufnahme, gemeinfrei, Internet Archive (Great 78 Project);
+    // die ersten 35 Sekunden, am Ende ausgeblendet
     const gloria = { puffer: null, laden: null, quelle: null, lautstaerke: null };
 
     function gloriaLaden() {
@@ -1022,18 +1078,20 @@
         }
     }
 
-    // Lautstärke nach Entfernung zur Kapelle; der Marsch spielt beim Marschieren und Abholen,
-    // „Preußens Gloria“ bei der Ankunft am Zelt
+    // Lautstärke nach Entfernung zur Kapelle; der Marsch spielt beim Marschieren und Abholen
+    // und schweigt, solange „Hoch soll er leben“ oder „Preußens Gloria“ läuft
     function musikLautstaerke() {
         if (!musik.ctx) return;
         const kapellmeister = personen[5];
         const d = Math.hypot(kapellmeister.x - R.spieler.x, kapellmeister.z - R.spieler.z);
         const nah = Math.max(0, 1 - d / 300);
         if (musik.haupt && musik.timer) {
-            const spielt = ['marsch1', 'abholen', 'marsch2'].includes(zustand.phase) && zustand.musik;
+            const spielt = ['marsch1', 'abholen', 'marsch2'].includes(zustand.phase) && zustand.musik
+                && !gloria.quelle && !liedLaeuft();
             musik.haupt.gain.setTargetAtTime(spielt ? 0.35 * nah : 0, musik.ctx.currentTime, 0.3);
         }
         if (gloria.quelle) gloria.lautstaerke.gain.setTargetAtTime(0.8 * nah, musik.ctx.currentTime, 0.2);
+        if (lied.ausgang) lied.ausgang.gain.setTargetAtTime(0.4 * nah, musik.ctx.currentTime, 0.2);
     }
 
     // ---------- Bedienfeld ----------
@@ -1142,6 +1200,6 @@
         zustand, personen, adressen, routePlanen, starten, stoppen, aktualisieren, adresseWaehlen, wegSuchen, zeltZugang,
         get zuschauer() { return zuschauer; },
         get feuerwehr() { return feuerwehr; },
-        gloria, musik,
+        gloria, musik, lied, liedLaeuft,
     };
 })();
