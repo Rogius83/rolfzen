@@ -291,7 +291,12 @@
     })();
     const zeltAndock = zeltZugang.andock;
 
-    const adressen = D.adressen.map(a => ({ ...a, name: `${a.s} ${a.h}` }));
+    // Adressen aus OSM plus die in der Festplanung ergänzten, nach Straße und Hausnummer sortiert
+    const nummer = h => [parseInt(h, 10) || 0, h];
+    const adressen = D.adressen
+        .concat((ROLFZEN_FEST.adressenErgaenzt || []).map(([s, h, lat, lon]) => ({ s, h, p: R.lokal(lat, lon) })))
+        .map(a => ({ ...a, name: `${a.s} ${a.h}` }))
+        .sort((a, b) => a.s.localeCompare(b.s, 'de') || nummer(a.h)[0] - nummer(b.h)[0] || a.h.localeCompare(b.h));
 
     // Stelle vor der Haustür: vom Gebäude Richtung Straße, außerhalb des Gebäudes
     function koenigsHaus(adresse) {
@@ -579,6 +584,146 @@
         }
     }
 
+    // ---------- Feuerwehr: Sperre der Hauptstraße ----------
+
+    const KLASSE = { primary: 3, primary_link: 3, secondary: 2, secondary_link: 2, tertiary: 1, tertiary_link: 1 };
+    let feuerwehr = null;   // { gruppe, lichter, fahrzeuge: [[x, z], ...] }
+
+    // Wichtigste Straße auf dem Weg (Klasse, dann Länge) und der Abschnitt, den der Umzug darauf benutzt
+    function hauptstrasseFinden(pfad) {
+        const proben = [];
+        for (let s = 0; s <= pfad.gesamt; s += 4) {
+            const [x, z] = pfad.punkt(s);
+            let beste = null;
+            for (const seg of segmente) {
+                const r = R.naechsterPunktAufStrecke(x, z, seg.ax, seg.az, seg.bx, seg.bz);
+                if (!beste || r.d < beste.d) beste = { d: r.d, s: seg.s };
+            }
+            const k = beste && beste.d < 6 && KLASSE[beste.s.t] ? (beste.s.n || beste.s.t) : null;
+            proben.push({ s, k, klasse: k ? KLASSE[beste.s.t] : 0 });
+        }
+        const wertung = new Map();
+        for (const p of proben) if (p.k) wertung.set(p.k, Math.max(wertung.get(p.k) || 0, p.klasse * 10000) + 1);
+        if (!wertung.size) return null;
+        const name = [...wertung.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        const treffer = proben.filter(p => p.k === name);
+        return { name, von: treffer[0].s, bis: treffer[treffer.length - 1].s };
+    }
+
+    // Punkt auf der Hauptstraße nahe (x, z) samt Fahrtrichtung der Straße dort
+    function aufHauptstrasse(name, x, z) {
+        let beste = null;
+        for (const seg of segmente) {
+            if ((seg.s.n || seg.s.t) !== name) continue;
+            const r = R.naechsterPunktAufStrecke(x, z, seg.ax, seg.az, seg.bx, seg.bz);
+            if (!beste || r.d < beste.d) {
+                const l = Math.hypot(seg.bx - seg.ax, seg.bz - seg.az);
+                beste = { d: r.d, x: r.qx, z: r.qz, dx: (seg.bx - seg.ax) / l, dz: (seg.bz - seg.az) / l };
+            }
+        }
+        return beste;
+    }
+
+    // Löschfahrzeug quer über die Fahrbahn; Rückgabe: Gruppe und die beiden Blaulichter
+    function fahrzeugBauen(x, z, dx, dz) {
+        const g = new THREE.Group();
+        g.position.set(x, hoehe(x, z), z);
+        g.rotation.y = Math.atan2(-dz, dx);    // Längsachse (lokal z) quer zur Straße
+        const mat = c => new THREE.MeshLambertMaterial({ color: c });
+        const rot = mat(0xc8102e), dunkel = mat(0x2b2b2b);
+        const teil = (geo, m, px, py, pz, rx, rz) => {
+            const t = new THREE.Mesh(geo, m);
+            t.position.set(px, py, pz);
+            if (rx) t.rotation.x = rx;
+            if (rz) t.rotation.z = rz;
+            t.castShadow = !HANDY;
+            g.add(t);
+            return t;
+        };
+        teil(box(2.4, 0.4, 7.4), dunkel, 0, 0.6, 0);                        // Fahrgestell
+        teil(box(2.5, 2.3, 2.0), rot, 0, 1.95, 2.6);                       // Kabine
+        teil(box(2.2, 0.9, 0.05), mat(0x22303c), 0, 2.45, 3.61);           // Frontscheibe
+        teil(box(2.5, 2.5, 5.0), rot, 0, 2.05, -1.0);                      // Aufbau
+        teil(box(2.52, 0.25, 5.02), mat(0xffffff), 0, 1.4, -1.0);          // weißer Streifen
+        teil(box(0.6, 0.1, 5.4), mat(0xbdbdbd), 0, 3.4, -0.8);             // Leiter
+        for (const rz of [2.4, -1.2, -2.6]) {
+            for (const rx of [-1.2, 1.2]) teil(zyl(0.5, 0.5, 0.35, 14), dunkel, rx, 0.5, rz, 0, Math.PI / 2);
+        }
+        const lichter = [-0.7, 0.7].map(lx => teil(box(0.35, 0.2, 0.3), new THREE.MeshBasicMaterial({ color: 0x2f6bff }), lx, 3.2, 3.2));
+        return { g, lichter };
+    }
+
+    // Feuerwehrmann: dunkelblau mit gelben Warnstreifen und gelbem Helm; eine Hand zum Anhalten erhoben
+    function feuerwehrmannBauen(gruppe, x, z, blick, stopp) {
+        const p = new THREE.Group();
+        p.position.set(x, hoehe(x, z), z);
+        p.rotation.y = blick;
+        const blau = new THREE.MeshLambertMaterial({ color: 0x1b2a4a }), gelb = new THREE.MeshLambertMaterial({ color: 0xf2c200 });
+        const teil = (geo, m, px, py, pz, rx) => {
+            const t = new THREE.Mesh(geo, m);
+            t.position.set(px, py, pz);
+            if (rx) t.rotation.x = rx;
+            t.castShadow = !HANDY;
+            p.add(t);
+        };
+        teil(box(0.5, 0.65, 0.3), blau, 0, 1.18, 0);
+        teil(box(0.52, 0.07, 0.32), gelb, 0, 1.05, 0);
+        teil(box(0.52, 0.07, 0.32), gelb, 0, 1.3, 0);
+        teil(new THREE.SphereGeometry(0.14, 10, 8), new THREE.MeshLambertMaterial({ color: 0xe8bf9a }), 0, 1.65, 0);
+        teil(new THREE.SphereGeometry(0.17, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), gelb, 0, 1.68, 0);
+        for (const sx of [-0.12, 0.12]) {
+            teil(box(0.18, 0.85, 0.2).translate(0, -0.425, 0), blau, sx, 0.86, 0);
+            teil(box(0.19, 0.06, 0.21), gelb, sx, 0.35, 0);
+        }
+        // Arme am Schultergelenk; der rechte bei „stopp“ nach vorn oben
+        for (const [sx, winkel] of [[-0.32, 0], [0.32, stopp ? -2.4 : 0]]) {
+            const gelenk = new THREE.Group();
+            gelenk.position.set(sx, 1.48, 0);
+            gelenk.rotation.x = winkel;
+            const arm = new THREE.Mesh(box(0.13, 0.62, 0.15).translate(0, -0.31, 0), blau);
+            arm.castShadow = !HANDY;
+            gelenk.add(arm);
+            p.add(gelenk);
+        }
+        gruppe.add(p);
+    }
+
+    function feuerwehrAufstellen(route) {
+        feuerwehrAbbauen();
+        const haupt = hauptstrasseFinden(route.pfad);
+        if (!haupt) return;
+        const gruppe = new THREE.Group();
+        szene.add(gruppe);
+        const fahrzeuge = [], lichter = [];
+        // Vor der Einmündung (gegen die Marschrichtung) und hinter der letzten Abbiegung (in Marschrichtung)
+        for (const [s, vorzeichen, sRichtung] of [[haupt.von, -1, haupt.von + 3], [haupt.bis, 1, haupt.bis - 3]]) {
+            const [px, pz] = route.pfad.punkt(s);
+            const [dx, dz] = route.pfad.richtung(sRichtung);
+            const ort = aufHauptstrasse(haupt.name, px + dx * 14 * vorzeichen, pz + dz * 14 * vorzeichen);
+            if (!ort) continue;
+            // Richtung von der Sperre weg vom Umzug, entlang der Straße
+            let ax = ort.dx, az = ort.dz;
+            if ((ort.x - px) * ax + (ort.z - pz) * az < 0) { ax = -ax; az = -az; }
+            const f = fahrzeugBauen(ort.x, ort.z, ort.dx, ort.dz);
+            gruppe.add(f.g);
+            lichter.push(...f.lichter);
+            fahrzeuge.push([ort.x, ort.z]);
+            // Drei Feuerwehrleute 4 m vor dem Fahrzeug zur Verkehrsseite, quer über die Fahrbahn verteilt
+            const nx = -az, nz = ax;
+            [-2.2, 0, 2.2].forEach((quer, i) => {
+                feuerwehrmannBauen(gruppe, ort.x + ax * 4 + nx * quer, ort.z + az * 4 + nz * quer, Math.atan2(ax, az), i === 1);
+            });
+        }
+        feuerwehr = { gruppe, lichter, fahrzeuge, strasse: haupt.name, zeit: 0 };
+    }
+
+    function feuerwehrAbbauen() {
+        if (!feuerwehr) return;
+        szene.remove(feuerwehr.gruppe);
+        feuerwehr.gruppe.traverse(o => { if (o.isMesh) { o.material.dispose(); o.geometry.dispose(); } });
+        feuerwehr = null;
+    }
+
     // ---------- Ablauf ----------
 
     const zustand = {
@@ -638,6 +783,7 @@
         }
         zustand.route = route;
         zuschauer = zuschauerPlanen(route);
+        feuerwehrAufstellen(route);
         zustand.sKopf = 0;
         zustand.zeit = 0;
         zustand.phase = 'treffen';
@@ -661,6 +807,7 @@
         zustand.phase = 'aus';
         zustand.route = null;
         zuschauer = [];
+        feuerwehrAbbauen();
         koenigspaarAnDieTuer();
         musikStoppen();
     }
@@ -717,6 +864,11 @@
         }
 
         zuschauerAktualisieren(dt);
+        // Blaulichter abwechselnd blinken lassen
+        if (feuerwehr) {
+            feuerwehr.zeit += dtEcht;
+            feuerwehr.lichter.forEach((l, i) => { l.visible = (Math.floor(feuerwehr.zeit * 4) + i) % 2 === 0; });
+        }
         figurenZeichnen(zustand.phase !== 'aus');
         zuschauerZeichnen();
         const k = koenigspaar[0];
@@ -926,6 +1078,10 @@
 
     R.erweiterungen.proBild.push(aktualisieren);
     R.erweiterungen.minikarte.push((ctx, massstab) => {
+        if (feuerwehr) {
+            ctx.fillStyle = '#c8102e';
+            for (const [x, z] of feuerwehr.fahrzeuge) ctx.fillRect(x - 4 / massstab, z - 4 / massstab, 8 / massstab, 8 / massstab);
+        }
         const sichtbar = zustand.phase === 'aus' ? koenigspaar : personen;
         for (const p of sichtbar) {
             ctx.fillStyle = koenigspaar.includes(p) ? GOLD : MUSIKER.has(p.rolle) ? '#24365e' : p.rolle === 'fahne' ? '#ffffff' : '#2f5a34';
@@ -940,5 +1096,6 @@
     window.umzug = {
         zustand, personen, adressen, routePlanen, starten, stoppen, aktualisieren, adresseWaehlen, wegSuchen, zeltZugang,
         get zuschauer() { return zuschauer; },
+        get feuerwehr() { return feuerwehr; },
     };
 })();

@@ -795,16 +795,14 @@
             quader(l, q, 0.8, 0.8, 0.04, farbe('#f4f3ee'), bodenBei(l, q) + 1.1);
         }
 
-        // Bierzeltgarnituren zwischen Bühne und Theke; frei bleiben der Gang vor dem Eingang
-        // und der Platz vor der Königsbühne
-        for (const q of [-4, 0, 4]) {
-            for (let l = b.von[1] + 0.5 + 1.1; l + 1.1 < t.von[0] - 3.6; l += 2.6) {
-                if (q >= 0 && Math.abs(l - el) < t2 + 1) continue;
-                if (q < 0 && l + 1.1 > k.von[0] - 1 && l - 1.1 < k.von[1] + 1) continue;
+        // Bierzeltgarnituren quer zur Zeltachse an der Ostwand zwischen Bandbühne und Eingang,
+        // je zwei Tische hintereinander von der Wand aus; vor der Königsbühne bleibt eine Tanzfläche frei
+        for (let l = b.von[1] + 1.2; l + 0.8 < el - t2; l += 2.4) {
+            for (const q of [b2 - 1.3, b2 - 3.55]) {
                 const y = bodenBei(l, q);
-                quader(l, q, 2.2, 0.6, 0.75, holz, y);
-                quader(l, q - 0.65, 2.2, 0.25, 0.45, holz, y);
-                quader(l, q + 0.65, 2.2, 0.25, 0.45, holz, y);
+                quader(l, q, 0.6, 2.2, 0.75, holz, y);
+                quader(l - 0.65, q, 0.25, 2.2, 0.45, holz, y);
+                quader(l + 0.65, q, 0.25, 2.2, 0.45, holz, y);
             }
         }
         // Kleine Holzrampe vor dem Eingang: 1,5 m lang, steigt zur Zeltwand auf 0,25 m

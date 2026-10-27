@@ -72,9 +72,14 @@ const ROLFZEN_FEST = {
     ],
     // Erzeugte Bäume in diesem Umkreis (m) um die Zeltmitte werden durch die eingemessenen ersetzt
     baumUmkreis: 55,
+    // Adressen, die in OpenStreetMap fehlen: [Straße, Hausnummer, lat, lon]
+    // Entruper Weg 7: Gebäude direkt neben Nr. 1 (in OSM ohne Hausnummer), Lage laut Karte aus dem Dorf
+    adressenErgaenzt: [['Entruper Weg', '7', 51.8459046, 9.1442902]],
     umzug: {
         treffpunkt: 'Gaststätte Zum Körter',
-        koenigStandard: 'Rosenstraße 5',
+        koenigStandard: 'Entruper Weg 7',
+        // Sperrt die Hauptstraße an beiden Enden des Abschnitts, den der Umzug benutzt
+        feuerwehr: { fahrzeuge: 2, leuteJeFahrzeug: 3 },
         fahnentraeger: 2,
         musiker: 12,
         schuetzen: 36,
