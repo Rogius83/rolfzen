@@ -344,12 +344,13 @@
     // ---------- Teilnehmer und Formation ----------
 
     // Königspaar und Hofstaat stehen vorn in der Liste; sie werden gemeinsam abgeholt.
-    // Hofstaat: zwei Paare in der Reihe hinter dem Königspaar, links und rechts je Herr außen, Dame innen;
-    // stuhl = Platz an der Königstafel entlang der Zeltachse relativ zur Mitte
+    // Hofstaat: zwei Paare in Zweierreihen hinter dem Königspaar, Herr links, Dame rechts, Hand in Hand;
+    // reihe = Reihe hinter dem Königspaar, stuhl = Platz an der Königstafel entlang der Zeltachse relativ zur Mitte
+    const HAND_ABSTAND = 0.9;   // so weit stehen Herr und Dame auseinander, wenn sie sich an der Hand halten
     const personen = [{ rolle: 'koenig', stuhl: -0.4 }, { rolle: 'koenigin', stuhl: 0.4 },
-        { rolle: 'hofherr', q: -1.8, stuhl: -2.3 }, { rolle: 'hofdame', q: -0.6, stuhl: -1.5 },
-        { rolle: 'hofdame', q: 0.6, stuhl: 1.5 }, { rolle: 'hofherr', q: 1.8, stuhl: 2.3 }];
-    const HOFSTAAT_AB = 1.5;
+        { rolle: 'hofherr', reihe: 1, q: -HAND_ABSTAND / 2, stuhl: -2.3 }, { rolle: 'hofdame', reihe: 1, q: HAND_ABSTAND / 2, stuhl: -1.5 },
+        { rolle: 'hofherr', reihe: 2, q: -HAND_ABSTAND / 2, stuhl: 1.5 }, { rolle: 'hofdame', reihe: 2, q: HAND_ABSTAND / 2, stuhl: 2.3 }];
+    const HOFSTAAT_AB = 1.5, HOFSTAAT_REIHEN = 2;
     personen.push({ rolle: 'fahne', ab: 0, q: -0.9, fahne: '#1f6b34' }, { rolle: 'fahne', ab: 0, q: 0.9, fahne: '#f2f2f2' });
     const kapelle = [['trommel_klein', 'trommel_gross', 'trommel_klein'], ['trompete', 'trompete', 'trompete'],
         ['horn', 'horn', 'horn'], ['tuba', 'tuba', 'tuba']];
@@ -358,7 +359,7 @@
     const AB_KOENIG = 2.2 + 3 * 1.6 + 2.6;
     personen[0].ab = AB_KOENIG; personen[0].q = -0.8;
     personen[1].ab = AB_KOENIG; personen[1].q = 0.8;
-    for (const p of personen.slice(2, 6)) p.ab = AB_KOENIG + HOFSTAAT_AB;
+    for (const p of personen.slice(2, 6)) p.ab = AB_KOENIG + p.reihe * HOFSTAAT_AB;
     // Die Herren vom Hofstaat tragen die Schützenmütze mit weißem Band
     for (const p of personen.slice(2, 6)) if (p.rolle === 'hofherr') p.bandFarbe = U.hutbaender[0][1];
     // Schützen in Dreierreihen; das erste Drittel der Reihen mit weißem, dann rotem, dann grünem Hutband
@@ -366,7 +367,7 @@
     for (let r = 0; r < schuetzenReihen; r++) {
         const band = U.hutbaender[Math.min(U.hutbaender.length - 1, Math.floor(r * U.hutbaender.length / schuetzenReihen))];
         for (let c = 0; c < U.reihenBreite; c++) {
-            personen.push({ rolle: 'schuetze', ab: AB_KOENIG + HOFSTAAT_AB + 2.6 + r * 1.6, q: SPALTEN[c], band: band[0], bandFarbe: band[1] });
+            personen.push({ rolle: 'schuetze', ab: AB_KOENIG + HOFSTAAT_REIHEN * HOFSTAAT_AB + 2.4 + r * 1.6, q: SPALTEN[c], band: band[0], bandFarbe: band[1] });
         }
     }
     for (const p of personen) Object.assign(p, { x: 0, z: 0, richtung: 0, geht: false, phase: zufall() * 6 });
@@ -394,7 +395,22 @@
     const schwung = p => p.geht ? Math.sin(p.phase) * 0.55 : 0;
     // Beine: beim Sitzen beide nach vorn angewinkelt
     const bein = (p, seite) => p.sitzt ? -1.45 : schwung(p) * seite;
+    // Hofstaat: Herr links, Dame rechts halten sich an der Hand, solange sie nebeneinander gehen oder stehen.
+    // seite > 0 ist der linke Arm (lokal +x), seite < 0 der rechte.
+    const HAND_KIPPEN = Math.asin((HAND_ABSTAND / 2 - 0.32) / 0.62);
+    const haeltHand = p => (p.rolle === 'hofherr' || p.rolle === 'hofdame') && !p.sitzt && !p.einzug;
+    const handArm = (p, seite) => haeltHand(p) && (p.rolle === 'hofherr' ? seite < 0 : seite > 0);
+    // Die Damen winken mit dem Blumenstrauß in der rechten Hand, sobald sie mit dem Zug gehen
+    const winkt = (p, seite) => p.rolle === 'hofdame' && seite < 0 && !p.sitzt && !p.einzug
+        && (zustand.phase === 'marsch2' || zustand.phase === 'angekommen');
+    const armKippen = (p, seite) => {
+        if (handArm(p, seite)) return p.rolle === 'hofherr' ? -HAND_KIPPEN : HAND_KIPPEN;
+        if (winkt(p, seite)) return -0.3 + Math.sin(zustand.zeit * 7) * 0.35;
+        return 0;
+    };
     const armWinkel = (p, seite) => {
+        if (handArm(p, seite)) return 0;
+        if (winkt(p, seite)) return -2.6;
         if (MUSIKER.has(p.rolle)) return p.rolle === 'tuba' ? -0.9 : -1.1;
         if (seite > 0 && p.rolle === 'fahne') return -0.5;
         if (seite > 0 && p.rolle === 'schuetze') return -0.6;
@@ -417,8 +433,13 @@
         { geo: zyl(0.128, 0.128, 0.05, 16), pos: [0, 1.81, 0], fuer: nur('koenig'), farbe: () => '#c0c0c0' },
         { geo: box(0.18, 0.85, 0.2).translate(0, -0.425, 0), pos: [-0.12, 0.86, 0], winkel: p => bein(p, 1), fuer: alle, farbe: () => '#2b2b33' },
         { geo: box(0.18, 0.85, 0.2).translate(0, -0.425, 0), pos: [0.12, 0.86, 0], winkel: p => bein(p, -1), fuer: alle, farbe: () => '#2b2b33' },
-        { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), fuer: alle, farbe: jacke },
-        { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [0.32, 1.48, 0], winkel: p => armWinkel(p, 1), fuer: alle, farbe: jacke },
+        { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), kippen: p => armKippen(p, -1), fuer: alle, farbe: jacke },
+        { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [0.32, 1.48, 0], winkel: p => armWinkel(p, 1), kippen: p => armKippen(p, 1), fuer: alle, farbe: jacke },
+        // Blumenstrauß der Hofdamen in der rechten Hand: weiße Manschette, bunte Blüten
+        { geo: new THREE.ConeGeometry(0.08, 0.2, 10).translate(0, -0.7, 0), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), kippen: p => armKippen(p, -1), fuer: nur('hofdame'), farbe: () => '#f5f5f0' },
+        { geo: new THREE.IcosahedronGeometry(0.1, 1).translate(0, -0.84, 0), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), kippen: p => armKippen(p, -1), fuer: nur('hofdame'), farbe: () => '#e75480' },
+        { geo: new THREE.IcosahedronGeometry(0.05, 0).translate(0.06, -0.9, 0.04), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), kippen: p => armKippen(p, -1), fuer: nur('hofdame'), farbe: () => '#ffd23f' },
+        { geo: new THREE.IcosahedronGeometry(0.05, 0).translate(-0.05, -0.91, -0.04), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), kippen: p => armKippen(p, -1), fuer: nur('hofdame'), farbe: () => '#c8102e' },
         { geo: zyl(0.16, 0.46, 0.95, 14).translate(0, 0.475, 0), pos: [0, 0, 0], fuer: nur('koenigin'), farbe: () => '#8b1e3f' },
         // Hofdamen: langes Kleid, Haare hochgesteckt
         { geo: zyl(0.16, 0.42, 0.95, 14).translate(0, 0.475, 0), pos: [0, 0, 0], fuer: nur('hofdame'), farbe: () => KLEID_HOFDAME },
@@ -465,7 +486,7 @@
             for (let i = 0; i < teil.mesh.count; i++) {
                 const p = teil.personen[i];
                 const rot = teil.rot || [0, 0, 0];
-                e.set(rot[0] + (teil.winkel ? teil.winkel(p) : 0), rot[1], rot[2]);
+                e.set(rot[0] + (teil.winkel ? teil.winkel(p) : 0), rot[1], rot[2] + (teil.kippen ? teil.kippen(p) : 0));
                 ml.compose(v.set(...teil.pos), q.setFromEuler(e), teil.skala ? v.clone().set(...teil.skala) : s1);
                 m.multiplyMatrices(zeilen.get(p), ml);
                 teil.mesh.setMatrixAt(i, m);
@@ -814,7 +835,8 @@
     function koenigspaarAnDieTuer() {
         const { tuer, blick, quer } = zustand.haus;
         abzuholen.forEach(p => {
-            const seite = p.stuhl * 1.2;
+            // quer zeigt mit Blick zur Straße nach links: König und Herren links, Damen rechts
+            const seite = -p.stuhl * 1.2;
             p.x = tuer[0] + quer[0] * seite;
             p.z = tuer[1] + quer[1] * seite;
             p.richtung = blick;
