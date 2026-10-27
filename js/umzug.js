@@ -940,9 +940,19 @@
     const KLANG = { melodie: ['sawtooth', 0.16], begleitung: ['square', 0.04], bass: ['triangle', 0.45] };
     const lied = { ausgang: null, ende: 0 };
 
+    // Es klingt immer nur ein Stück: ein neues Stück beendet das vorige und schaltet den Marsch sofort stumm
+    function andereMusikAus() {
+        gloriaStoppen();
+        liedStoppen();
+        if (musik.haupt) {
+            musik.haupt.gain.cancelScheduledValues(musik.ctx.currentTime);
+            musik.haupt.gain.setValueAtTime(0, musik.ctx.currentTime);
+        }
+    }
+
     function liedSpielen(daten) {
         if (!zustand.musik || !musik.ctx) return;
-        liedStoppen();
+        andereMusikAus();
         const c = musik.ctx, start = c.currentTime + 0.1;
         lied.ausgang = c.createGain();
         lied.ausgang.gain.value = 0;
@@ -1055,7 +1065,7 @@
 
     function gloriaSpielen() {
         if (!zustand.musik || !musik.ctx || !gloria.puffer) return;
-        gloriaStoppen();
+        andereMusikAus();
         const c = musik.ctx, jetzt = c.currentTime, dauer = gloria.puffer.duration;
         const quelle = c.createBufferSource(), ausblenden = c.createGain(), lautstaerke = c.createGain();
         quelle.buffer = gloria.puffer;
