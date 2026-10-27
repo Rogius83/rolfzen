@@ -343,7 +343,13 @@
 
     // ---------- Teilnehmer und Formation ----------
 
-    const personen = [{ rolle: 'koenig' }, { rolle: 'koenigin' }];
+    // Königspaar und Hofstaat stehen vorn in der Liste; sie werden gemeinsam abgeholt.
+    // Hofstaat: zwei Paare in der Reihe hinter dem Königspaar, links und rechts je Herr außen, Dame innen;
+    // stuhl = Platz an der Königstafel entlang der Zeltachse relativ zur Mitte
+    const personen = [{ rolle: 'koenig', stuhl: -0.4 }, { rolle: 'koenigin', stuhl: 0.4 },
+        { rolle: 'hofherr', q: -1.8, stuhl: -2.3 }, { rolle: 'hofdame', q: -0.6, stuhl: -1.5 },
+        { rolle: 'hofdame', q: 0.6, stuhl: 1.5 }, { rolle: 'hofherr', q: 1.8, stuhl: 2.3 }];
+    const HOFSTAAT_AB = 1.5;
     personen.push({ rolle: 'fahne', ab: 0, q: -0.9, fahne: '#1f6b34' }, { rolle: 'fahne', ab: 0, q: 0.9, fahne: '#f2f2f2' });
     const kapelle = [['trommel_klein', 'trommel_gross', 'trommel_klein'], ['trompete', 'trompete', 'trompete'],
         ['horn', 'horn', 'horn'], ['tuba', 'tuba', 'tuba']];
@@ -352,22 +358,28 @@
     const AB_KOENIG = 2.2 + 3 * 1.6 + 2.6;
     personen[0].ab = AB_KOENIG; personen[0].q = -0.8;
     personen[1].ab = AB_KOENIG; personen[1].q = 0.8;
+    for (const p of personen.slice(2, 6)) p.ab = AB_KOENIG + HOFSTAAT_AB;
+    // Die Herren vom Hofstaat tragen die Schützenmütze mit weißem Band
+    for (const p of personen.slice(2, 6)) if (p.rolle === 'hofherr') p.bandFarbe = U.hutbaender[0][1];
     // Schützen in Dreierreihen; das erste Drittel der Reihen mit weißem, dann rotem, dann grünem Hutband
     const schuetzenReihen = U.schuetzen / U.reihenBreite;
     for (let r = 0; r < schuetzenReihen; r++) {
         const band = U.hutbaender[Math.min(U.hutbaender.length - 1, Math.floor(r * U.hutbaender.length / schuetzenReihen))];
         for (let c = 0; c < U.reihenBreite; c++) {
-            personen.push({ rolle: 'schuetze', ab: AB_KOENIG + 2.6 + r * 1.6, q: SPALTEN[c], band: band[0], bandFarbe: band[1] });
+            personen.push({ rolle: 'schuetze', ab: AB_KOENIG + HOFSTAAT_AB + 2.6 + r * 1.6, q: SPALTEN[c], band: band[0], bandFarbe: band[1] });
         }
     }
     for (const p of personen) Object.assign(p, { x: 0, z: 0, richtung: 0, geht: false, phase: zufall() * 6 });
     const koenigspaar = personen.slice(0, 2);
+    const abzuholen = personen.slice(0, 6);   // Königspaar mit Hofstaat
     const MUSIKER = new Set(['trommel_klein', 'trommel_gross', 'trompete', 'horn', 'tuba']);
 
     // ---------- Figuren als Instanzen je Körperteil ----------
 
     // Schützen, Fahnenträger und König im schwarzen Anzug
-    const JACKE = { schuetze: '#171717', fahne: '#171717', koenig: '#171717', koenigin: '#8b1e3f' };
+    // Hofdamen im Kleid in Dunkelblau
+    const KLEID_HOFDAME = '#2a5d8f';
+    const JACKE = { schuetze: '#171717', fahne: '#171717', koenig: '#171717', hofherr: '#171717', koenigin: '#8b1e3f', hofdame: KLEID_HOFDAME };
     const jacke = p => JACKE[p.rolle] || '#24365e';            // Kapelle in Dunkelblau
     const hut = p => MUSIKER.has(p.rolle) ? '#1b2742' : '#22442a';
     const GOLD = '#d4af37';
@@ -386,19 +398,19 @@
         if (MUSIKER.has(p.rolle)) return p.rolle === 'tuba' ? -0.9 : -1.1;
         if (seite > 0 && p.rolle === 'fahne') return -0.5;
         if (seite > 0 && p.rolle === 'schuetze') return -0.6;
-        return -schwung(p) * seite * (p.rolle === 'koenigin' ? 0.3 : 0.7);
+        return -schwung(p) * seite * (p.rolle === 'koenigin' || p.rolle === 'hofdame' ? 0.3 : 0.7);
     };
 
     const TEILE = [
         { geo: box(0.5, 0.65, 0.28), pos: [0, 1.18, 0], fuer: alle, farbe: jacke },
         { geo: new THREE.SphereGeometry(0.14, 10, 8), pos: [0, 1.65, 0], fuer: alle, farbe: () => '#e8bf9a' },
-        { geo: zyl(0.2, 0.2, 0.03, 14), pos: [0, 1.77, 0], fuer: ausser('koenigin', 'koenig', 'schuetze'), farbe: hut },
-        { geo: zyl(0.11, 0.13, 0.13, 12), pos: [0, 1.84, 0], fuer: ausser('koenigin', 'koenig', 'schuetze'), farbe: hut },
-        // Schützenmütze (Schirmmütze): farbiges Band, schwarzer Deckel, glänzender Schirm, Knopf vorn
-        { geo: zyl(0.145, 0.145, 0.07, 16), pos: [0, 1.79, 0], fuer: nur('schuetze'), farbe: p => p.bandFarbe },
-        { geo: zyl(0.19, 0.15, 0.07, 16), pos: [0, 1.86, 0], fuer: nur('schuetze'), farbe: () => '#151515' },
-        { geo: new THREE.CylinderGeometry(0.15, 0.15, 0.015, 12, 1, false, -Math.PI / 2, Math.PI), pos: [0, 1.76, 0.03], rot: [0.3, 0, 0], skala: [1, 1, 0.9], fuer: nur('schuetze'), farbe: () => '#050505' },
-        { geo: new THREE.SphereGeometry(0.018, 6, 4), pos: [0, 1.79, 0.145], fuer: nur('schuetze'), farbe: () => '#d8d8d8' },
+        { geo: zyl(0.2, 0.2, 0.03, 14), pos: [0, 1.77, 0], fuer: ausser('koenigin', 'koenig', 'schuetze', 'hofherr', 'hofdame'), farbe: hut },
+        { geo: zyl(0.11, 0.13, 0.13, 12), pos: [0, 1.84, 0], fuer: ausser('koenigin', 'koenig', 'schuetze', 'hofherr', 'hofdame'), farbe: hut },
+        // Schützenmütze (Schirmmütze) der Schützen und Hofherren: farbiges Band, schwarzer Deckel, glänzender Schirm, Knopf vorn
+        { geo: zyl(0.145, 0.145, 0.07, 16), pos: [0, 1.79, 0], fuer: nur('schuetze', 'hofherr'), farbe: p => p.bandFarbe },
+        { geo: zyl(0.19, 0.15, 0.07, 16), pos: [0, 1.86, 0], fuer: nur('schuetze', 'hofherr'), farbe: () => '#151515' },
+        { geo: new THREE.CylinderGeometry(0.15, 0.15, 0.015, 12, 1, false, -Math.PI / 2, Math.PI), pos: [0, 1.76, 0.03], rot: [0.3, 0, 0], skala: [1, 1, 0.9], fuer: nur('schuetze', 'hofherr'), farbe: () => '#050505' },
+        { geo: new THREE.SphereGeometry(0.018, 6, 4), pos: [0, 1.79, 0.145], fuer: nur('schuetze', 'hofherr'), farbe: () => '#d8d8d8' },
         // Zylinder des Königs: Krempe, hoher Hutkörper, silbernes Band
         { geo: zyl(0.21, 0.21, 0.025, 16), pos: [0, 1.77, 0], fuer: nur('koenig'), farbe: () => '#151515' },
         { geo: zyl(0.125, 0.12, 0.34, 16), pos: [0, 1.95, 0], fuer: nur('koenig'), farbe: () => '#151515' },
@@ -408,6 +420,10 @@
         { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), fuer: alle, farbe: jacke },
         { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [0.32, 1.48, 0], winkel: p => armWinkel(p, 1), fuer: alle, farbe: jacke },
         { geo: zyl(0.16, 0.46, 0.95, 14).translate(0, 0.475, 0), pos: [0, 0, 0], fuer: nur('koenigin'), farbe: () => '#8b1e3f' },
+        // Hofdamen: langes Kleid, Haare hochgesteckt
+        { geo: zyl(0.16, 0.42, 0.95, 14).translate(0, 0.475, 0), pos: [0, 0, 0], fuer: nur('hofdame'), farbe: () => KLEID_HOFDAME },
+        { geo: new THREE.SphereGeometry(0.15, 10, 6), pos: [0, 1.69, -0.02], skala: [1, 0.7, 1], fuer: nur('hofdame'), farbe: () => '#5d4037' },
+        { geo: new THREE.SphereGeometry(0.07, 8, 6), pos: [0, 1.74, -0.13], fuer: nur('hofdame'), farbe: () => '#5d4037' },
         { geo: new THREE.TorusGeometry(0.09, 0.025, 6, 14), pos: [0, 1.79, 0], rot: [Math.PI / 2, 0, 0], fuer: nur('koenigin'), farbe: () => GOLD },
         { geo: new THREE.TorusGeometry(0.15, 0.02, 6, 16), pos: [0, 1.36, 0.15], rot: [-0.25, 0, 0], skala: [1, 1.3, 1], fuer: nur('koenig'), farbe: () => '#dcdcdc' },
         { geo: zyl(0.025, 0.025, 3.2, 6).translate(0, 1.6, 0), pos: [0.38, 0.4, 0.2], fuer: nur('fahne'), farbe: () => GOLD },
@@ -434,7 +450,7 @@
         teil.mesh.castShadow = !HANDY;
         teil.personen.forEach((p, i) => teil.mesh.setColorAt(i, new THREE.Color(teil.farbe(p))));
         // König und Königin stehen vorn in der Liste und bleiben auch ohne Umzug sichtbar
-        teil.anzahlPaar = teil.personen.filter(p => koenigspaar.includes(p)).length;
+        teil.anzahlPaar = teil.personen.filter(p => abzuholen.includes(p)).length;
         szene.add(teil.mesh);
     }
 
@@ -794,10 +810,11 @@
         einzug: 'Einzug ins Zelt', imZelt: 'Alle im Zelt',
     };
 
+    // Königspaar vor der Haustür, der Hofstaat links und rechts daneben in derselben Reihenfolge wie an der Königstafel
     function koenigspaarAnDieTuer() {
         const { tuer, blick, quer } = zustand.haus;
-        koenigspaar.forEach((p, i) => {
-            const seite = i === 0 ? -0.5 : 0.5;
+        abzuholen.forEach(p => {
+            const seite = p.stuhl * 1.2;
             p.x = tuer[0] + quer[0] * seite;
             p.z = tuer[1] + quer[1] * seite;
             p.richtung = blick;
@@ -873,7 +890,7 @@
         // Wer zuerst hereinkommt, geht nach hinten durch
         plaetze.sort((a, b) => b.abstand - a.abstand);
 
-        // Königsbühne: Stühle des Königspaars, Blick nach Osten ins Zelt
+        // Königsbühne: Stühle von Königspaar und Hofstaat, Blick nach Osten ins Zelt
         const k = innen.koenigsbuehne;
         const kl = (k.von[0] + k.von[1]) / 2, kq = (k.von[2] + k.von[3]) / 2;
         const buehneOben = Math.max(...[[k.von[0], k.von[2]], [k.von[1], k.von[2]], [k.von[1], k.von[3]], [k.von[0], k.von[3]]]
@@ -895,8 +912,8 @@
         // Wer im Zug vorn läuft, ist zuerst am Eingang
         for (const p of [...personen].sort((a, b) => a.ab - b.ab || a.q - b.q)) {
             let platz;
-            if (p === koenigspaar[0]) platz = stuhl(kl - 0.4);
-            else if (p === koenigspaar[1]) platz = stuhl(kl + 0.4);
+            // Königspaar auf die goldenen, Hofstaat auf die roten Stühle an der Königstafel
+            if (abzuholen.includes(p)) platz = stuhl(kl + p.stuhl);
             else if (p.band === 'weiß' && zurTheke > 0 && theke.length) { platz = theke.shift(); zurTheke--; }
             else platz = plaetze.shift() || theke.shift();
             if (!platz) continue;
@@ -946,7 +963,7 @@
         // Lose Gruppe rund um den Körter
         const mitte = [koerterAndock.x, koerterAndock.z];
         for (const p of personen) {
-            if (koenigspaar.includes(p)) continue;
+            if (abzuholen.includes(p)) continue;
             let x = mitte[0], z = mitte[1];
             for (let versuch = 0; versuch < 20; versuch++) {
                 const w = zufall() * Math.PI * 2, r = 3 + zufall() * 10;
@@ -979,7 +996,7 @@
         } else if (zustand.phase === 'antreten') {
             let alleDa = true;
             for (const p of personen) {
-                if (koenigspaar.includes(p)) continue;
+                if (abzuholen.includes(p)) continue;
                 if (!hingehen(p, slot(p, 0), TEMPO * 1.2 * dt)) alleDa = false;
             }
             if (alleDa) {
@@ -1004,7 +1021,7 @@
             }
         } else if (zustand.phase === 'abholen') {
             let beideDa = true;
-            for (const p of koenigspaar) {
+            for (const p of abzuholen) {
                 if (!hingehen(p, slot(p, zustand.sKopf), 1.2 * dt)) beideDa = false;
             }
             if (beideDa) {
@@ -1024,7 +1041,7 @@
         const marschiert = zustand.phase === 'marsch1' || zustand.phase === 'marsch2';
         if (['marsch1', 'abholen', 'marsch2', 'angekommen'].includes(zustand.phase)) {
             for (const p of personen) {
-                const abgeholt = !koenigspaar.includes(p) || zustand.phase === 'marsch2' || zustand.phase === 'angekommen';
+                const abgeholt = !abzuholen.includes(p) || zustand.phase === 'marsch2' || zustand.phase === 'angekommen';
                 if (!abgeholt) continue;
                 Object.assign(p, slot(p, zustand.sKopf), { geht: marschiert });
             }
@@ -1335,7 +1352,7 @@
     });
 
     hinKnopf.addEventListener('click', () => {
-        const ziel = zustand.phase === 'aus' ? koenigspaar[0] : personen[2];
+        const ziel = zustand.phase === 'aus' ? koenigspaar[0] : personen.find(p => p.rolle === 'fahne');
         // Seitlich neben den Umzug stellen und zu ihm schauen
         const w = ziel.richtung + Math.PI / 2;
         R.zuOrtSpringen({ p: [ziel.x + Math.sin(w) * 8, ziel.z + Math.cos(w) * 8] });
@@ -1374,9 +1391,9 @@
             ctx.fillStyle = '#c8102e';
             for (const [x, z] of feuerwehr.fahrzeuge) ctx.fillRect(x - 4 / massstab, z - 4 / massstab, 8 / massstab, 8 / massstab);
         }
-        const sichtbar = zustand.phase === 'aus' ? koenigspaar : personen;
+        const sichtbar = zustand.phase === 'aus' ? abzuholen : personen;
         for (const p of sichtbar) {
-            ctx.fillStyle = koenigspaar.includes(p) ? GOLD : MUSIKER.has(p.rolle) ? '#24365e' : p.rolle === 'fahne' ? '#ffffff' : '#2f5a34';
+            ctx.fillStyle = abzuholen.includes(p) ? GOLD : MUSIKER.has(p.rolle) ? '#24365e' : p.rolle === 'fahne' ? '#ffffff' : '#2f5a34';
             ctx.beginPath();
             ctx.arc(p.x, p.z, 2.2 / massstab, 0, Math.PI * 2);
             ctx.fill();
