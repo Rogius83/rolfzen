@@ -378,6 +378,33 @@
     const MITTELLINIE = new Set(['primary', 'secondary', 'tertiary']);
     const strassenRaster = new Raster(25);
 
+    // Teile einer Linie außerhalb des Zelts (das Ende der Straße An der Lehmkuhle liegt in OSM darunter).
+    // Nur Linien in Zeltnähe werden dafür in 1-m-Schritte zerlegt.
+    function ohneZelt(punkte) {
+        const nah = punkte.some(([x, z]) => Math.hypot(x - zelt.mx, z - zelt.mz) < 60);
+        if (!nah) return [punkte];
+        const stuecke = [];
+        let aktuell = [], getroffen = false;
+        for (let i = 0; i < punkte.length - 1; i++) {
+            const [ax, az] = punkte[i], [bx, bz] = punkte[i + 1];
+            const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az)));
+            for (let k = 0; k <= n; k++) {
+                if (k === 0 && i > 0) continue;
+                const x = ax + (bx - ax) * k / n, z = az + (bz - az) * k / n;
+                if (punktInPolygon(x, z, zelt.ring)) {
+                    getroffen = true;
+                    if (aktuell.length > 1) stuecke.push(aktuell);
+                    aktuell = [];
+                } else {
+                    aktuell.push([x, z]);
+                }
+            }
+        }
+        if (aktuell.length > 1) stuecke.push(aktuell);
+        // Linien, die das Zelt nicht berühren, bleiben unverändert
+        return getroffen ? stuecke : [punkte];
+    }
+
     function strassenBauen() {
         const gewaesser = new GeometrieBauer();
         const blau = farbe('#4f8fc0');
@@ -391,7 +418,9 @@
         const linien = new GeometrieBauer();
         const weiss = farbe('#f2f2ee');
         for (const s of sortiert) {
-            bauer.band(s.p, s.w, unbefestigt(s) ? 0.15 : 0.18, farbe(STRASSEN_FARBE[s.t]));
+            for (const stueck of ohneZelt(s.p)) {
+                bauer.band(stueck, s.w, unbefestigt(s) ? 0.15 : 0.18, farbe(STRASSEN_FARBE[s.t]));
+            }
 
             if (MITTELLINIE.has(s.t)) {
                 let strecke = 0;
@@ -625,9 +654,9 @@
         const ring = festRechteck(z.laenge, z.breite, z.ausrichtung).map(([x, zz]) => [mx + x, mz + zz]);
         const punkt = (l, q) => [mx + l * ux + q * ox, mz + l * uz + q * oz];
         // Eingang in der Mitte der östlichen Längsseite, zum Asphaltplatz
-        const eingang = punkt(0, z.breite / 2);
+        const eingang = punkt(z.eingangLaengs, z.breite / 2);
         const platz = ROLFZEN_FEST.platz.map(([l, q]) => punkt(l, q));
-        return { ...z, mx, mz, ux, uz, ox, oz, ring, punkt, eingang, eingangBreite: 4, platz };
+        return { ...z, mx, mz, ux, uz, ox, oz, ring, punkt, eingang, platz };
     })();
     const hindernisse = [];   // Ringe von Buden und Karussell, für inGebaeude
     let karussell = null;
@@ -664,14 +693,19 @@
         const unten = Math.min(...boden) - 0.3, oben = Math.max(...boden) + 3;
         const l2 = laenge / 2, b2 = breite / 2, t2 = zelt.eingangBreite / 2;
 
-        // Wände; an der Ostseite (q = +b2) bleibt der Eingang offen (bis 2,5 m Höhe)
+        // Wände; an der Ostseite (q = +b2) bleibt der Eingang offen, an der Westseite die beiden
+        // Ecken (Band- und Thekenseite) auf je 1,5 m, jeweils bis 2,5 m Höhe
         const wand = (a, b, y0, y1, f) => bauer.viereck(p(a[0], a[1], y0), p(b[0], b[1], y0), p(b[0], b[1], y1), p(a[0], a[1], y1), f);
-        wand([-l2, -b2], [l2, -b2], unten, oben, weiss);
+        const ecke = zelt.eckOeffnung;
+        wand([-l2 + ecke, -b2], [l2 - ecke, -b2], unten, oben, weiss);
+        wand([-l2, -b2], [-l2 + ecke, -b2], bodenBei(-l2 + ecke / 2, -b2) + 2.5, oben, weiss);
+        wand([l2 - ecke, -b2], [l2, -b2], bodenBei(l2 - ecke / 2, -b2) + 2.5, oben, weiss);
         wand([-l2, -b2], [-l2, b2], unten, oben, weiss);
         wand([l2, -b2], [l2, b2], unten, oben, weiss);
-        wand([-l2, b2], [-t2, b2], unten, oben, weiss);
-        wand([t2, b2], [l2, b2], unten, oben, weiss);
-        wand([-t2, b2], [t2, b2], bodenBei(0, b2) + 2.5, oben, weiss);
+        const el = zelt.eingangLaengs;   // Mitte des Eingangs entlang der Ostseite
+        wand([-l2, b2], [el - t2, b2], unten, oben, weiss);
+        wand([el + t2, b2], [l2, b2], unten, oben, weiss);
+        wand([el - t2, b2], [el + t2, b2], bodenBei(el, b2) + 2.5, oben, weiss);
         // Grünes Band an der Traufe
         for (const [a, b] of [[[-l2, -b2], [l2, -b2]], [[-l2, b2], [l2, b2]], [[-l2, -b2], [-l2, b2]], [[l2, -b2], [l2, b2]]]) {
             const f = 1.003;
@@ -687,21 +721,103 @@
             const [x, z] = zelt.punkt(l, q);
             quaderBauen(bauer, x, z, u, o, lu, lq, y !== undefined ? y : bodenBei(l, q), h, f);
         };
-        // Bierzeltgarnituren in drei Reihen; vor dem Eingang bleibt ein Gang frei. Theke an der Nordseite.
+        const innen = ROLFZEN_FEST.innen;
+        const schwarz = farbe('#1c1c1c'), metall = farbe('#b0b0b0'), rot = farbe('#8b1e3f'), gold = farbe('#d4af37');
+
+        // Podest über einem Rechteck [l von, l bis, q von, q bis]; liefert die Oberkante.
+        // Podeste und Theke sind Hindernisse, damit man nicht hindurchläuft.
+        function podest([l0, l1, q0, q1], h, f) {
+            const ecken = [[l0, q0], [l1, q0], [l1, q1], [l0, q1]];
+            const boeden = ecken.map(([l, q]) => bodenBei(l, q));
+            const oben = Math.max(...boeden) + h;
+            quader((l0 + l1) / 2, (q0 + q1) / 2, l1 - l0, q1 - q0, oben - Math.min(...boeden) + 0.1, f, Math.min(...boeden) - 0.1);
+            const ring = ecken.map(([l, q]) => zelt.punkt(l, q));
+            hindernisse.push(ring);
+            kantenEinfuegen(ring);
+            return oben;
+        }
+
+        // Norden: Bühne für die Band mit Schlagzeug, Verstärkern, Boxen und Mikrofonständern
+        const b = innen.buehne, bo = podest(b.von, b.hoehe, farbe('#4e3b2a'));
+        const bl = b.von[0];
+        quader(bl + 1.6, 0, 0.6, 0.7, 0.7, rot, bo);                 // große Trommel
+        quader(bl + 1.4, -0.8, 0.45, 0.45, 0.6, rot, bo);            // Stand-Tom
+        quader(bl + 2.0, 0.6, 0.35, 0.35, 0.85, rot, bo);            // Snare
+        for (const q of [-1.1, 1.2]) {                                // Becken
+            quader(bl + 2.0, q, 0.05, 0.05, 1.3, metall, bo);
+            quader(bl + 2.0, q, 0.6, 0.6, 0.02, gold, bo + 1.3);
+        }
+        for (const q of [-4.7, 4.7]) quader(bl + 1.0, q, 0.7, 0.9, 1.6, schwarz, bo);   // Boxen
+        for (const q of [-2.8, 2.8]) quader(bl + 0.6, q, 0.45, 0.7, 0.6, schwarz, bo);  // Verstärker
+        quader(bl + 2.4, 3.3, 0.5, 1.3, 0.85, schwarz, bo);          // Keyboard
+        for (const q of [-2.2, 0, 2.2]) quader(bl + 3.4, q, 0.04, 0.04, 1.6, metall, bo); // Mikrofone
+        {
+            const [x, z] = zelt.punkt(bl + 0.3, 0);
+            beschriftung('Schützenfest Rolfzen', x, z, bo + 2.4, 5, 'rgba(31, 81, 48, 0.9)');
+        }
+
+        // Westen mittig: Bühne für das Königspaar mit langem Tisch (weiße Decke); in der Mitte die goldenen
+        // Stühle des Königspaars, links und rechts je zwei Stühle für die beiden Hofstaatpaare
+        const k = innen.koenigsbuehne, ko = podest(k.von, k.hoehe, farbe('#5a4030'));
+        const km = (k.von[0] + k.von[1]) / 2, kq = (k.von[2] + k.von[3]) / 2;
+        quader(km, kq, k.von[1] - k.von[0] - 0.2, k.von[3] - k.von[2] - 0.2, 0.02, rot, ko);   // roter Teppich
+        quader(km, kq + 0.6, 5.6, 0.9, 0.76, farbe('#ffffff'), ko);                             // Tisch mit Decke
+        for (const [l, f, lehne] of [[km - 0.4, gold, 1.3], [km + 0.4, gold, 1.3],
+            [km - 2.3, rot, 1.0], [km - 1.5, rot, 1.0], [km + 1.5, rot, 1.0], [km + 2.3, rot, 1.0]]) {
+            quader(l, kq - 0.4, 0.55, 0.5, 0.48, f, ko);              // Sitz
+            quader(l, kq - 0.7, 0.55, 0.1, lehne, f, ko);             // Lehne
+        }
+        // Getränkekühlschränke neben der Königsbühne: grünes Gehäuse, Glastür zum Zelt
+        for (const [l, q] of innen.kuehlschraenke) {
+            quader(l, q, 0.7, 0.7, 1.9, farbe('#0b5a2e'));
+            quader(l, q + 0.36, 0.55, 0.02, 1.4, farbe('#9fc4d6'), bodenBei(l, q) + 0.3);
+            const [x, z] = zelt.punkt(l, q);
+            beschriftung('Veltins', x, z, bodenBei(l, q) + 2.2, 1.2, 'rgba(11, 90, 46, 0.95)');
+            const ring = [[l - 0.35, q - 0.35], [l + 0.35, q - 0.35], [l + 0.35, q + 0.35], [l - 0.35, q + 0.35]].map(([a, c]) => zelt.punkt(a, c));
+            hindernisse.push(ring);
+            kantenEinfuegen(ring);
+        }
+        {
+            const [x, z] = zelt.punkt(km, k.von[2] + 0.3);
+            beschriftung('Königspaar', x, z, ko + 2.8, 3.2, 'rgba(120, 90, 10, 0.9)');
+        }
+
+        // Süden: Getränketheke mit Regal dahinter, davor Stehtische
+        const t = innen.theke;
+        podest(t.von, t.hoehe, theke);
+        quader(t.von[1] + 1.1, (t.von[2] + t.von[3]) / 2, 0.4, t.von[3] - t.von[2], 2, holz);
+        {
+            const [x, z] = zelt.punkt((t.von[0] + t.von[1]) / 2, 0);
+            beschriftung(t.name, x, z, bodenBei(t.von[0], 0) + 2.8, 3, 'rgba(110, 30, 20, 0.85)');
+        }
+        for (const [l, q] of innen.stehtische) {
+            quader(l, q, 0.08, 0.08, 1.1, metall);
+            quader(l, q, 0.8, 0.8, 0.04, farbe('#f4f3ee'), bodenBei(l, q) + 1.1);
+        }
+
+        // Bierzeltgarnituren zwischen Bühne und Theke; frei bleiben der Gang vor dem Eingang
+        // und der Platz vor der Königsbühne
         for (const q of [-4, 0, 4]) {
-            for (let l = -l2 + 4.5; l < l2 - 3.5; l += 2.6) {
-                if (q >= 0 && Math.abs(l) < t2 + 1) continue;
+            for (let l = b.von[1] + 0.5 + 1.1; l + 1.1 < t.von[0] - 3.6; l += 2.6) {
+                if (q >= 0 && Math.abs(l - el) < t2 + 1) continue;
+                if (q < 0 && l + 1.1 > k.von[0] - 1 && l - 1.1 < k.von[1] + 1) continue;
                 const y = bodenBei(l, q);
                 quader(l, q, 2.2, 0.6, 0.75, holz, y);
                 quader(l, q - 0.65, 2.2, 0.25, 0.45, holz, y);
                 quader(l, q + 0.65, 2.2, 0.25, 0.45, holz, y);
             }
         }
-        quader(-l2 + 1.2, 0, 1, 6, 1.1, theke);
-        // Fahnenmasten links und rechts vom Eingang
-        for (const l of [-t2 - 1.5, t2 + 1.5]) {
-            quader(l, b2 + 1.5, 0.15, 0.15, 8, farbe('#dddddd'));
-            quader(l + (l > 0 ? 0.8 : -0.8), b2 + 1.5, 1.5, 0.05, 1.0, l > 0 ? weiss : gruen, bodenBei(l, b2 + 1.5) + 6.6);
+        // Kleine Holzrampe vor dem Eingang: 1,5 m lang, steigt zur Zeltwand auf 0,25 m
+        {
+            const rampe = farbe('#9a7b55');
+            const aussen = b2 + 1.5;
+            const yI0 = bodenBei(el - t2, b2) + 0.25, yI1 = bodenBei(el + t2, b2) + 0.25;
+            const yA0 = bodenBei(el - t2, aussen) + 0.02, yA1 = bodenBei(el + t2, aussen) + 0.02;
+            bauer.viereck(p(el - t2, b2, yI0), p(el + t2, b2, yI1), p(el + t2, aussen, yA1), p(el - t2, aussen, yA0), rampe);
+            for (const l of [el - t2, el + t2]) {
+                const yI = l < el ? yI0 : yI1, yA = l < el ? yA0 : yA1;
+                bauer.dreieck(p(l, b2, yI - 0.27), p(l, b2, yI), p(l, aussen, yA), rampe);
+            }
         }
 
         const mesh = bauer.mesh(vertexMaterial());
@@ -709,10 +825,12 @@
         mesh.receiveShadow = true;
         szene.add(mesh);
 
-        // Kollision: alle Wände außer dem Eingang (Ring: NW, NO, SO, SW -> Ostseite ist Kante 1)
-        const nw = zelt.punkt(-l2, -b2), no = zelt.punkt(-l2, b2), so = zelt.punkt(l2, b2), sw = zelt.punkt(l2, -b2);
-        kantenEinfuegen([sw, nw, no, zelt.punkt(-t2, b2)], [3]);
-        kantenEinfuegen([zelt.punkt(t2, b2), so, sw], [2]);
+        // Kollision: alle Wandstücke außer Eingang und den beiden offenen Westecken
+        const wandstuecke = [
+            [[-l2 + ecke, -b2], [l2 - ecke, -b2]], [[-l2, -b2], [-l2, b2]], [[l2, -b2], [l2, b2]],
+            [[-l2, b2], [el - t2, b2]], [[el + t2, b2], [l2, b2]],
+        ];
+        for (const [a, b] of wandstuecke) kantenEinfuegen([zelt.punkt(...a), zelt.punkt(...b)], [1]);
 
         festplatzBauen();
     }
@@ -739,15 +857,16 @@
         }
         bodenEbene(asphalt.mesh(vertexMaterial()), -3);
 
-        // Buden: Rückseite und Seiten, Theke vorn, gestreifte Markise, Schild; Front zur Platzmitte
+        // Buden: Rückseite und Seiten, Theke vorn, gestreifte Markise, Schild;
+        // Front zur Platzmitte oder zum Punkt blickZu
         const bauer = new GeometrieBauer();
-        const mitte = zelt.punkt(0, 14);
         const weiss = farbe('#f6f4ee'), holz = farbe('#8a6a45');
         for (const b of F.buden) {
             const [x, z] = zelt.punkt(b.laengs, b.quer);
+            const mitte = zelt.punkt(...(b.blickZu || [0, 14]));
             let fx = mitte[0] - x, fz = mitte[1] - z;
             const fl = Math.hypot(fx, fz); fx /= fl; fz /= fl;
-            const sx = -fz, sz = fx, tiefe = 2.2;
+            const sx = -fz, sz = fx, tiefe = b.tiefe || 2.2;
             const ecken = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) => [x + sx * s * b.breite / 2 + fx * t * tiefe / 2, z + sz * s * b.breite / 2 + fz * t * tiefe / 2]);
             const y0 = Math.min(...ecken.map(([px, pz]) => hoehe(px, pz))) - 0.2;
             const farbig = farbe(b.farbe);
@@ -766,6 +885,78 @@
             beschriftung(b.name, x, z, y0 + 3.6, 4, 'rgba(110, 30, 20, 0.85)');
             hindernisse.push(ecken);
             kantenEinfuegen(ecken);
+        }
+        toilettenBauen(bauer);
+
+        // Container hinter dem Zelt: Glascontainer mit abgeschrägtem Deckel und Einwurf,
+        // Altkleidercontainer höher und schmaler; beide entlang der Zeltachsen ausgerichtet
+        const zu = [zelt.ux, zelt.uz], zo = [zelt.ox, zelt.oz];
+        for (const c of F.container) {
+            const [x, z] = zelt.punkt(c.laengs, c.quer);
+            const glas = c.art === 'glas';
+            const breite = glas ? 1.5 : 1.6, tiefe = glas ? 1.5 : 1.3, h = glas ? 1.6 : 2.2;
+            const ecken = quaderBauen(bauer, x, z, zo, zu, breite, tiefe, hoehe(x, z) - 0.1, h + 0.1, farbe(c.farbe), glas);
+            const y1 = hoehe(x, z) + h;
+            if (glas) {
+                // Deckel als flache Pyramide
+                for (let i = 0; i < 4; i++) {
+                    const a = ecken[i], b = ecken[(i + 1) % 4];
+                    bauer.dreieck([a[0], y1, a[1]], [b[0], y1, b[1]], [x, y1 + 0.35, z], farbe(c.farbe));
+                }
+            }
+            // Einwurf bzw. Klappe auf der Nordseite (zum Zelt)
+            const [ex, ez] = zelt.punkt(c.laengs - tiefe / 2 - 0.02, c.quer);
+            quaderBauen(bauer, ex, ez, zo, zu, glas ? 0.5 : 0.9, 0.02, hoehe(x, z) + (glas ? 1.15 : 1.2), glas ? 0.2 : 0.45, farbe('#222222'));
+            beschriftung(c.name, x, z, y1 + (glas ? 0.8 : 0.5), 1.4, 'rgba(40, 40, 40, 0.85)');
+            hindernisse.push(ecken);
+            kantenEinfuegen(ecken);
+        }
+
+        // Banner „Schützenfest Rolfzen“ zwischen zwei Pfosten; Text auf beiden Seiten lesbar
+        const bannerTextur = (() => {
+            const leinwand = document.createElement('canvas');
+            leinwand.width = 1024; leinwand.height = 256;
+            const ctx = leinwand.getContext('2d');
+            ctx.fillStyle = '#1f5130';
+            ctx.fillRect(0, 0, 1024, 256);
+            ctx.strokeStyle = '#ffd23f';
+            ctx.lineWidth = 12;
+            ctx.strokeRect(12, 12, 1000, 232);
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = 'bold 96px Segoe UI, Arial';
+            const datum = F.banner.datum;
+            ctx.fillText(F.banner.text, 512, datum ? 100 : 128, 960);
+            if (datum) {
+                ctx.font = 'bold 64px Segoe UI, Arial';
+                ctx.fillStyle = '#ffd23f';
+                ctx.fillText(datum, 512, 190, 960);
+            }
+            return new THREE.CanvasTexture(leinwand);
+        })();
+        for (const [a, e] of F.banner.liste) {
+            const [ax, az] = zelt.punkt(...a), [ex, ez] = zelt.punkt(...e);
+            const laenge = Math.hypot(ex - ax, ez - az);
+            const ya = hoehe(ax, az), ye = hoehe(ex, ez);
+            for (const [x, z, y] of [[ax, az, ya], [ex, ez, ye]]) {
+                quaderBauen(bauer, x, z, [1, 0], [0, 1], 0.1, 0.1, y - 0.2, 2.6, farbe('#dddddd'));
+            }
+            // Zwei Tücher Rücken an Rücken, damit der Text von beiden Seiten richtig herum steht
+            const tuchGeo = new THREE.PlaneGeometry(laenge - 0.15, laenge / 4);
+            const tuchMat = new THREE.MeshLambertMaterial({ map: bannerTextur });
+            for (const drehung of [0, Math.PI]) {
+                const tuch = new THREE.Mesh(tuchGeo, tuchMat);
+                tuch.position.set((ax + ex) / 2, (ya + ye) / 2 + 1.0 + laenge / 8, (az + ez) / 2);
+                tuch.rotation.y = -Math.atan2(ez - az, ex - ax) + drehung;
+                tuch.castShadow = true;
+                szene.add(tuch);
+            }
+            // Als schmales Hindernis, damit niemand hindurchläuft
+            const nx = -(ez - az) / laenge * 0.15, nz = (ex - ax) / laenge * 0.15;
+            const ring = [[ax + nx, az + nz], [ex + nx, ez + nz], [ex - nx, ez - nz], [ax - nx, az - nz]];
+            hindernisse.push(ring);
+            kantenEinfuegen(ring);
         }
         const budenMesh = bauer.mesh(vertexMaterial());
         budenMesh.castShadow = true;
@@ -796,6 +987,46 @@
         hindernisse.push(kring);
         kantenEinfuegen(kring);
         beschriftung(k.name, kx, kz, ky + 5.2, 4, 'rgba(110, 30, 20, 0.85)');
+    }
+
+    // Offizierhaus: Öffnung in der Wand zum Platz mit zwei Toilettentüren
+    function toilettenBauen(bauer) {
+        const ort = D.orte.find(o => o.n === 'Offizierhaus');
+        if (!ort) return;
+        const mitte = p => [p.reduce((s, q) => s + q[0], 0) / p.length, p.reduce((s, q) => s + q[1], 0) / p.length];
+        const haus = D.gebaeude.reduce((beste, g) => {
+            const [cx, cz] = mitte(g.p);
+            const d = Math.hypot(cx - ort.p[0], cz - ort.p[1]);
+            return !beste || d < beste.d ? { g, d } : beste;
+        }, null).g;
+        const ring = haus.p;
+        // Wand, deren Außenseite am stärksten zum Zelt zeigt
+        let wand = null;
+        for (let i = 0; i < ring.length; i++) {
+            const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % ring.length];
+            const l = Math.hypot(bx - ax, bz - az);
+            let nx = (bz - az) / l, nz = -(bx - ax) / l;
+            if (punktInPolygon((ax + bx) / 2 + nx * 0.2, (az + bz) / 2 + nz * 0.2, ring)) { nx = -nx; nz = -nz; }
+            const zx = zelt.mx - (ax + bx) / 2, zz = zelt.mz - (az + bz) / 2, zl = Math.hypot(zx, zz);
+            const wert = (nx * zx + nz * zz) / zl;
+            if (l > 3.5 && (!wand || wert > wand.wert)) wand = { ax, az, ux: (bx - ax) / l, uz: (bz - az) / l, nx, nz, l, wert };
+        }
+        if (!wand) return;
+        const { ax, az, ux, uz, nx, nz, l } = wand;
+        const m = l / 2;
+        const y0 = hoehe(ax + ux * m + nx, az + uz * m + nz);
+        const pkt = (t, y, raus) => [ax + ux * t + nx * raus, y, az + uz * t + nz * raus];
+        const flaeche = (t0, t1, ya, yb, raus, f) => bauer.viereck(pkt(t0, ya, raus), pkt(t1, ya, raus), pkt(t1, yb, raus), pkt(t0, yb, raus), f);
+        // Dunkle Öffnung (3,2 m breit), darin zwei Türen
+        flaeche(m - 1.6, m + 1.6, y0 - 0.3, y0 + 2.4, 0.07, farbe('#2a2a2a'));
+        const namen = ROLFZEN_FEST.offizierhaus.toiletten;
+        [-0.75, 0.75].forEach((versatz, i) => {
+            flaeche(m + versatz - 0.45, m + versatz + 0.45, y0, y0 + 2.05, 0.1, farbe(i ? '#3f6fa8' : '#b0476a'));
+            const [x, , z] = pkt(m + versatz, 0, 0.6);
+            beschriftung(namen[i], x, z, y0 + 2.35, 1.4, i ? 'rgba(40, 80, 140, 0.9)' : 'rgba(150, 50, 90, 0.9)');
+        });
+        const [x, , z] = pkt(m, 0, 0.6);
+        beschriftung('WC', x, z, y0 + 3.0, 1.6, 'rgba(30, 30, 30, 0.85)');
     }
 
     // Schwebendes Namensschild

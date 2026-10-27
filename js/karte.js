@@ -61,9 +61,26 @@ const festplanung = L.layerGroup().addTo(karte);
         { color: '#b8860b', weight: 2, fillColor: '#fffbe8', fillOpacity: 0.85 })
         .bindPopup(`<b>${z.name}</b><br>${z.laenge} × ${z.breite} m, Eingang Ost`)
         .addTo(festplanung);
+    for (const teil of [F.innen.buehne, F.innen.koenigsbuehne, F.innen.theke]) {
+        const [l0, l1, q0, q1] = teil.von;
+        L.polygon([[l0, q0], [l1, q0], [l1, q1], [l0, q1]].map(([l, q]) => aufPlatz(l, q)),
+            { color: '#5a4030', weight: 1, fillColor: '#8a6a45', fillOpacity: 0.8 })
+            .bindTooltip(teil.name)
+            .addTo(festplanung);
+    }
     for (const b of F.buden) {
         L.circleMarker(aufPlatz(b.laengs, b.quer), { radius: 6, color: '#fff', weight: 1, fillColor: b.farbe, fillOpacity: 1 })
             .bindTooltip(b.name)
+            .addTo(festplanung);
+    }
+    for (const [a, e] of F.banner.liste) {
+        L.polyline([aufPlatz(...a), aufPlatz(...e)], { color: '#1f5130', weight: 4 })
+            .bindTooltip('Banner ' + F.banner.text)
+            .addTo(festplanung);
+    }
+    for (const c of F.container) {
+        L.circleMarker(aufPlatz(c.laengs, c.quer), { radius: 4, color: '#333', weight: 1, fillColor: c.farbe, fillOpacity: 1 })
+            .bindTooltip(c.name + 'container')
             .addTo(festplanung);
     }
     const k = F.karussell;

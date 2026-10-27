@@ -197,28 +197,99 @@
     // Ziel vor dem Zelt: 3,5 m östlich des Eingangs auf dem Asphaltplatz
     const zeltVorplatz = [zelt.eingang[0] + zelt.ox * 3.5, zelt.eingang[1] + zelt.oz * 3.5];
 
-    // Straße verlassen dort, wo der gerade Weg zum Vorplatz nicht durch Zelt, Buden oder Karussell führt.
-    // (Das Ende der Straße An der Lehmkuhle liegt in OSM unter dem Zelt.)
-    const zeltAndock = (() => {
-        const frei = (x, z) => {
-            const l = Math.hypot(zeltVorplatz[0] - x, zeltVorplatz[1] - z);
-            for (let d = 0; d <= l; d += 0.5) {
-                if (R.inGebaeude(x + (zeltVorplatz[0] - x) * d / l, z + (zeltVorplatz[1] - z) * d / l)) return false;
+    // Weg über den Festplatz: von der nächsten Straße bis vor die Rampe, um Zelt, Buden, Karussell,
+    // Banner und Container herum. Raster mit 0,75 m Zellen; frei ist eine Zelle nur, wenn im Umkreis
+    // von 1,5 m nichts steht, damit der Zug in Dreierreihen hindurchpasst.
+    const zeltZugang = (() => {
+        const ZELLE = 0.75, RADIUS = 45, ABSTAND = 1.5;
+        const n = Math.round(2 * RADIUS / ZELLE) + 1;
+        const x0 = zeltVorplatz[0] - RADIUS, z0 = zeltVorplatz[1] - RADIUS;
+        const lage = (i, j) => [x0 + i * ZELLE, z0 + j * ZELLE];
+        const zelleVon = (x, z) => [Math.round((x - x0) / ZELLE), Math.round((z - z0) / ZELLE)];
+        const frei = new Uint8Array(n * n);
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                const [x, z] = lage(i, j);
+                let ok = !R.inGebaeude(x, z);
+                for (let k = 0; ok && k < 8; k++) {
+                    const w = k / 8 * Math.PI * 2;
+                    if (R.inGebaeude(x + Math.cos(w) * ABSTAND, z + Math.sin(w) * ABSTAND)) ok = false;
+                }
+                frei[i * n + j] = ok ? 1 : 0;
+            }
+        }
+        // Dijkstra vom Vorplatz aus über freie Zellen (8 Nachbarn)
+        const dist = new Float32Array(n * n).fill(Infinity), vor = new Int32Array(n * n).fill(-1);
+        const [si, sj] = zelleVon(...zeltVorplatz);
+        const start = si * n + sj;
+        dist[start] = 0;
+        const offen = [start];
+        while (offen.length) {
+            let bi = 0;
+            for (let k = 1; k < offen.length; k++) if (dist[offen[k]] < dist[offen[bi]]) bi = k;
+            const c = offen[bi];
+            offen[bi] = offen[offen.length - 1];
+            offen.pop();
+            const ci = Math.floor(c / n), cj = c % n;
+            for (let di = -1; di <= 1; di++) {
+                for (let dj = -1; dj <= 1; dj++) {
+                    if (!di && !dj) continue;
+                    const i = ci + di, j = cj + dj;
+                    if (i < 0 || j < 0 || i >= n || j >= n || !frei[i * n + j]) continue;
+                    const nd = dist[c] + (di && dj ? Math.SQRT2 : 1) * ZELLE;
+                    if (nd < dist[i * n + j]) {
+                        if (dist[i * n + j] === Infinity) offen.push(i * n + j);
+                        dist[i * n + j] = nd;
+                        vor[i * n + j] = c;
+                    }
+                }
+            }
+        }
+        // Straßenpunkt mit dem kürzesten freien Weg über den Platz
+        let beste = null;
+        for (const seg of segmente) {
+            const l = Math.hypot(seg.bx - seg.ax, seg.bz - seg.az);
+            for (let t = 0; t <= 1; t += Math.min(1, 1 / Math.max(1, l))) {
+                const x = seg.ax + (seg.bx - seg.ax) * t, z = seg.az + (seg.bz - seg.az) * t;
+                const [i, j] = zelleVon(x, z);
+                if (i < 0 || j < 0 || i >= n || j >= n || dist[i * n + j] === Infinity) continue;
+                const d = dist[i * n + j] + Math.hypot(x - lage(i, j)[0], z - lage(i, j)[1]);
+                if (!beste || d < beste.d) beste = { x, z, seg, d, zelle: i * n + j };
+            }
+        }
+        if (!beste) {
+            // Kein freier Weg: wie bisher zum nächsten Straßenpunkt
+            const seg = segmente[0];
+            return { andock: { x: seg.ax, z: seg.az, seg, da: 0, db: Math.hypot(seg.bx - seg.ax, seg.bz - seg.az) * seg.faktor }, weg: [zeltVorplatz] };
+        }
+        // Rasterweg zurückverfolgen und zu wenigen geraden Stücken glätten
+        const roh = [];
+        for (let c = beste.zelle; c !== -1; c = vor[c]) roh.push(lage(Math.floor(c / n), c % n));
+        roh[roh.length - 1] = zeltVorplatz;
+        const sichtFrei = (a, b) => {
+            const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+            for (let d = 0; d <= l; d += ZELLE / 2) {
+                const [i, j] = zelleVon(a[0] + (b[0] - a[0]) * d / l, a[1] + (b[1] - a[1]) * d / l);
+                if (!frei[i * n + j]) return false;
             }
             return true;
         };
-        const kandidaten = [];
-        for (const seg of segmente) {
-            for (const t of [0, 0.25, 0.5, 0.75, 1]) {
-                const x = seg.ax + (seg.bx - seg.ax) * t, z = seg.az + (seg.bz - seg.az) * t;
-                kandidaten.push({ x, z, seg, d: Math.hypot(x - zeltVorplatz[0], z - zeltVorplatz[1]) });
-            }
+        const weg = [];
+        let von = [beste.x, beste.z];
+        for (let k = 0; k < roh.length;) {
+            let weit = k;
+            for (let m = roh.length - 1; m > k; m--) if (sichtFrei(von, roh[m])) { weit = m; break; }
+            weg.push(roh[weit]);
+            von = roh[weit];
+            k = weit + 1;
         }
-        kandidaten.sort((a, b) => a.d - b.d);
-        const k = kandidaten.find(c => c.d < 80 && frei(c.x, c.z)) || kandidaten[0];
-        const seg = k.seg;
-        return { x: k.x, z: k.z, seg, da: Math.hypot(k.x - seg.ax, k.z - seg.az) * seg.faktor, db: Math.hypot(k.x - seg.bx, k.z - seg.bz) * seg.faktor };
+        const seg = beste.seg;
+        return {
+            andock: { x: beste.x, z: beste.z, seg, da: Math.hypot(beste.x - seg.ax, beste.z - seg.az) * seg.faktor, db: Math.hypot(beste.x - seg.bx, beste.z - seg.bz) * seg.faktor },
+            weg,
+        };
     })();
+    const zeltAndock = zeltZugang.andock;
 
     const adressen = D.adressen.map(a => ({ ...a, name: `${a.s} ${a.h}` }));
 
@@ -245,7 +316,7 @@
         const weg1 = wegSuchen(koerterAndock, haus.strasse);
         const weg2 = weg1 && wegSuchen(haus.strasse, zeltAndock);
         if (!weg1 || !weg2) return null;
-        const pfad = new Pfad(weg1.concat(weg2.slice(1), [zeltVorplatz]));
+        const pfad = new Pfad(weg1.concat(weg2.slice(1), zeltZugang.weg));
         const sKoenig = new Pfad(weg1).gesamt;
         return { haus, pfad, sKoenig: Math.min(sKoenig, pfad.gesamt) };
     }
@@ -867,7 +938,7 @@
 
     // Für Tests
     window.umzug = {
-        zustand, personen, adressen, routePlanen, starten, stoppen, aktualisieren, adresseWaehlen, wegSuchen,
+        zustand, personen, adressen, routePlanen, starten, stoppen, aktualisieren, adresseWaehlen, wegSuchen, zeltZugang,
         get zuschauer() { return zuschauer; },
     };
 })();
