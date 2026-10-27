@@ -352,10 +352,12 @@
     const AB_KOENIG = 2.2 + 3 * 1.6 + 2.6;
     personen[0].ab = AB_KOENIG; personen[0].q = -0.8;
     personen[1].ab = AB_KOENIG; personen[1].q = 0.8;
+    // Schützen in Dreierreihen; das erste Drittel der Reihen mit weißem, dann rotem, dann grünem Hutband
     const schuetzenReihen = U.schuetzen / U.reihenBreite;
     for (let r = 0; r < schuetzenReihen; r++) {
+        const band = U.hutbaender[Math.min(U.hutbaender.length - 1, Math.floor(r * U.hutbaender.length / schuetzenReihen))];
         for (let c = 0; c < U.reihenBreite; c++) {
-            personen.push({ rolle: 'schuetze', ab: AB_KOENIG + 2.6 + r * 1.6, q: SPALTEN[c] });
+            personen.push({ rolle: 'schuetze', ab: AB_KOENIG + 2.6 + r * 1.6, q: SPALTEN[c], band: band[0], bandFarbe: band[1] });
         }
     }
     for (const p of personen) Object.assign(p, { x: 0, z: 0, richtung: 0, geht: false, phase: zufall() * 6 });
@@ -364,7 +366,8 @@
 
     // ---------- Figuren als Instanzen je Körperteil ----------
 
-    const JACKE = { schuetze: '#2f5a34', fahne: '#2f5a34', koenig: '#2f5a34', koenigin: '#8b1e3f' };
+    // Schützen, Fahnenträger und König im schwarzen Anzug
+    const JACKE = { schuetze: '#171717', fahne: '#171717', koenig: '#171717', koenigin: '#8b1e3f' };
     const jacke = p => JACKE[p.rolle] || '#24365e';            // Kapelle in Dunkelblau
     const hut = p => MUSIKER.has(p.rolle) ? '#1b2742' : '#22442a';
     const GOLD = '#d4af37';
@@ -377,6 +380,8 @@
 
     // Winkel der Glieder; Gehen schwingt Beine und freie Arme im Gleichschritt
     const schwung = p => p.geht ? Math.sin(p.phase) * 0.55 : 0;
+    // Beine: beim Sitzen beide nach vorn angewinkelt
+    const bein = (p, seite) => p.sitzt ? -1.45 : schwung(p) * seite;
     const armWinkel = (p, seite) => {
         if (MUSIKER.has(p.rolle)) return p.rolle === 'tuba' ? -0.9 : -1.1;
         if (seite > 0 && p.rolle === 'fahne') return -0.5;
@@ -387,14 +392,19 @@
     const TEILE = [
         { geo: box(0.5, 0.65, 0.28), pos: [0, 1.18, 0], fuer: alle, farbe: jacke },
         { geo: new THREE.SphereGeometry(0.14, 10, 8), pos: [0, 1.65, 0], fuer: alle, farbe: () => '#e8bf9a' },
-        { geo: zyl(0.2, 0.2, 0.03, 14), pos: [0, 1.77, 0], fuer: ausser('koenigin', 'koenig'), farbe: hut },
-        { geo: zyl(0.11, 0.13, 0.13, 12), pos: [0, 1.84, 0], fuer: ausser('koenigin', 'koenig'), farbe: hut },
+        { geo: zyl(0.2, 0.2, 0.03, 14), pos: [0, 1.77, 0], fuer: ausser('koenigin', 'koenig', 'schuetze'), farbe: hut },
+        { geo: zyl(0.11, 0.13, 0.13, 12), pos: [0, 1.84, 0], fuer: ausser('koenigin', 'koenig', 'schuetze'), farbe: hut },
+        // Schützenmütze (Schirmmütze): farbiges Band, schwarzer Deckel, glänzender Schirm, Knopf vorn
+        { geo: zyl(0.145, 0.145, 0.07, 16), pos: [0, 1.79, 0], fuer: nur('schuetze'), farbe: p => p.bandFarbe },
+        { geo: zyl(0.19, 0.15, 0.07, 16), pos: [0, 1.86, 0], fuer: nur('schuetze'), farbe: () => '#151515' },
+        { geo: new THREE.CylinderGeometry(0.15, 0.15, 0.015, 12, 1, false, -Math.PI / 2, Math.PI), pos: [0, 1.76, 0.03], rot: [0.3, 0, 0], skala: [1, 1, 0.9], fuer: nur('schuetze'), farbe: () => '#050505' },
+        { geo: new THREE.SphereGeometry(0.018, 6, 4), pos: [0, 1.79, 0.145], fuer: nur('schuetze'), farbe: () => '#d8d8d8' },
         // Zylinder des Königs: Krempe, hoher Hutkörper, silbernes Band
         { geo: zyl(0.21, 0.21, 0.025, 16), pos: [0, 1.77, 0], fuer: nur('koenig'), farbe: () => '#151515' },
         { geo: zyl(0.125, 0.12, 0.34, 16), pos: [0, 1.95, 0], fuer: nur('koenig'), farbe: () => '#151515' },
         { geo: zyl(0.128, 0.128, 0.05, 16), pos: [0, 1.81, 0], fuer: nur('koenig'), farbe: () => '#c0c0c0' },
-        { geo: box(0.18, 0.85, 0.2).translate(0, -0.425, 0), pos: [-0.12, 0.86, 0], winkel: p => schwung(p), fuer: alle, farbe: () => '#2b2b33' },
-        { geo: box(0.18, 0.85, 0.2).translate(0, -0.425, 0), pos: [0.12, 0.86, 0], winkel: p => -schwung(p), fuer: alle, farbe: () => '#2b2b33' },
+        { geo: box(0.18, 0.85, 0.2).translate(0, -0.425, 0), pos: [-0.12, 0.86, 0], winkel: p => bein(p, 1), fuer: alle, farbe: () => '#2b2b33' },
+        { geo: box(0.18, 0.85, 0.2).translate(0, -0.425, 0), pos: [0.12, 0.86, 0], winkel: p => bein(p, -1), fuer: alle, farbe: () => '#2b2b33' },
         { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), fuer: alle, farbe: jacke },
         { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [0.32, 1.48, 0], winkel: p => armWinkel(p, 1), fuer: alle, farbe: jacke },
         { geo: zyl(0.16, 0.46, 0.95, 14).translate(0, 0.475, 0), pos: [0, 0, 0], fuer: nur('koenigin'), farbe: () => '#8b1e3f' },
@@ -408,6 +418,9 @@
         { geo: new THREE.ConeGeometry(0.12, 0.6, 10), pos: [0, 1.55, 0.45], rot: [-Math.PI / 2, 0, 0], fuer: nur('horn'), farbe: () => GOLD },
         { geo: zyl(0.3, 0.1, 0.85, 12), pos: [0.05, 1.45, 0.28], fuer: nur('tuba'), farbe: () => GOLD },
         { geo: box(0.05, 0.06, 1.15), pos: [0.26, 1.55, -0.05], rot: [-0.9, 0, 0], fuer: nur('schuetze'), farbe: () => '#3b2a1e' },
+        // Eichenlaub oben im Gewehrlauf
+        { geo: new THREE.IcosahedronGeometry(0.1, 0), pos: [0.26, 2.08, 0.36], skala: [0.9, 1.5, 0.9], fuer: nur('schuetze'), farbe: () => '#3f7f2a' },
+        { geo: new THREE.IcosahedronGeometry(0.07, 0), pos: [0.31, 2.0, 0.42], fuer: nur('schuetze'), farbe: () => '#4f9a34' },
     ];
 
     const m = new THREE.Matrix4(), mp = new THREE.Matrix4(), ml = new THREE.Matrix4();
@@ -428,7 +441,7 @@
     function figurenZeichnen(alleSichtbar) {
         const zeilen = new Map();
         for (const p of personen) {
-            mp.compose(v.set(p.x, hoehe(p.x, p.z), p.z), q.setFromEuler(e.set(0, p.richtung, 0)), s1);
+            mp.compose(v.set(p.x, hoehe(p.x, p.z) + (p.yZusatz || 0), p.z), q.setFromEuler(e.set(0, p.richtung, 0)), s1);
             zeilen.set(p, mp.clone());
         }
         for (const teil of TEILE) {
@@ -466,6 +479,7 @@
     // ---------- Zuschauer aus den Häusern ----------
 
     const MAX_ZUSCHAUER = HANDY ? 40 : 90;
+    const AM_PLATZ = HANDY ? Math.ceil(U.zuschauerAmPlatz / 2) : U.zuschauerAmPlatz;
     const AB_ENDE = Math.max(...personen.map(p => p.ab));
     const TEMPO_ZUSCHAUER = { kind: 1.3, eltern: 1.1, aelter: 0.7 };
     const HEMD = ['#d32f2f', '#1976d2', '#388e3c', '#fbc02d', '#7b1fa2', '#f57c00', '#455a64', '#c2185b', '#0097a7', '#f5f5f5'];
@@ -498,7 +512,7 @@
         { geo: zyl(0.02, 0.02, 0.95, 6), pos: [0.38, 0.47, 0.15], nur: 'aelter', farbe: () => '#4e342e' },
     ];
     for (const teil of Z_TEILE) {
-        teil.mesh = new THREE.InstancedMesh(teil.geo, material, MAX_ZUSCHAUER);
+        teil.mesh = new THREE.InstancedMesh(teil.geo, material, MAX_ZUSCHAUER + AM_PLATZ);
         teil.mesh.frustumCulled = false;
         teil.mesh.castShadow = !HANDY;
         teil.mesh.count = 0;
@@ -549,6 +563,28 @@
                 });
             });
         }
+        // Am Schützenplatz warten Leute schon am Rand des letzten Wegstücks auf den Umzug
+        const pfad = route.pfad;
+        for (let i = 0, versuch = 0; i < AM_PLATZ && versuch < AM_PLATZ * 6; versuch++) {
+            const s = pfad.gesamt - 4 - zufall() * 26;
+            const [x0, z0] = pfad.punkt(s);
+            const [dx, dz] = pfad.richtung(s);
+            const nx = -dz, nz = dx;
+            const seite = zufall() < 0.5 ? -1 : 1, abstand = 2.8 + zufall() * 1.2;
+            const x = x0 + nx * seite * abstand, z = z0 + nz * seite * abstand;
+            if (R.inGebaeude(x, z)) continue;
+            const art = zufall() < 0.3 ? 'kind' : zufall() < 0.25 ? 'aelter' : 'eltern';
+            const aelter = art === 'aelter';
+            const spot = { x, z, richtung: Math.atan2(-nx * seite, -nz * seite) };
+            liste.push({
+                art, s, start: [x, z], spot, amPlatz: true,
+                x, z, richtung: spot.richtung, geht: false, phase: zufall() * 6, zustand: 'wartet',
+                warte: 0, skala: art === 'kind' ? 0.62 : aelter ? 0.97 : 1,
+                hemd: wahl(aelter ? HEMD_AELTER : HEMD), hose: aelter ? '#616161' : wahl(HOSE),
+                haare: aelter ? wahl(['#e0e0e0', '#bdbdbd', '#9e9e9e']) : wahl(HAARE), haut: wahl(HAUT),
+            });
+            i++;
+        }
         // Farben einmalig je Teil setzen
         for (const teil of Z_TEILE) {
             liste.forEach((p, i) => teil.mesh.setColorAt(i, new THREE.Color(teil.farbe(p))));
@@ -561,12 +597,19 @@
         const kopf = zustand.sKopf, schwanz = kopf - AB_ENDE;
         const unterwegs = ['marsch1', 'abholen', 'marsch2'].includes(zustand.phase);
         for (const p of zuschauer) {
+            if (p.amPlatz) {
+                // Jubeln, sobald der Zug in Sicht kommt, bis alle im Zelt sind
+                const jubeln = ['marsch2', 'angekommen', 'einzug'].includes(zustand.phase) && kopf > p.s - 40;
+                p.zustand = jubeln ? 'jubeln' : 'wartet';
+                p.phase += dt;
+                continue;
+            }
             if (p.zustand === 'drinnen') {
                 if (unterwegs && kopf > p.s - 70 && schwanz < p.s + 5) p.zustand = 'raus';
             } else if (p.zustand === 'raus') {
                 if (hingehen(p, p.spot, TEMPO_ZUSCHAUER[p.art] * dt)) p.zustand = 'jubeln';
             } else if (p.zustand === 'jubeln') {
-                if (schwanz > p.s + 12 || zustand.phase === 'angekommen') {
+                if (schwanz > p.s + 12 || ['angekommen', 'einzug', 'imZelt'].includes(zustand.phase)) {
                     p.warte -= dt;
                     if (p.warte <= 0) p.zustand = 'rein';
                 }
@@ -748,6 +791,7 @@
     const STATUS = {
         aus: 'Bereit', treffen: 'Treffen beim Körter', antreten: 'Antreten', marsch1: 'Marsch zum Schützenkönig',
         abholen: 'Königspaar wird abgeholt', marsch2: 'Marsch zum Schützenplatz', angekommen: 'Am Schützenzelt angekommen',
+        einzug: 'Einzug ins Zelt', imZelt: 'Alle im Zelt',
     };
 
     function koenigspaarAnDieTuer() {
@@ -759,6 +803,10 @@
             p.richtung = blick;
             p.geht = false;
         });
+    }
+
+    function hinsetzenZuruecksetzen() {
+        for (const p of personen) { p.sitzt = false; p.yZusatz = 0; p.einzug = null; }
     }
 
     function adresseWaehlen(adresse) {
@@ -790,6 +838,96 @@
         return false;
     }
 
+    // ---------- Einzug ins Zelt ----------
+
+    // Jedem Teilnehmer einen Platz und einen Weg dorthin geben: Königspaar auf die Stühle der
+    // Königsbühne, einige Schützen mit weißem Band an die Theke, alle anderen an die Bierbänke.
+    function einzugPlanen() {
+        const F = ROLFZEN_FEST, innen = F.innen, z = zelt;
+        const P = (l, q) => { const [x, zz] = z.punkt(l, q); return { x, z: zz }; };
+        const boden = (l, q) => { const p = P(l, q); return hoehe(p.x, p.z); };
+        const b2 = z.breite / 2, el = z.eingangLaengs, t2 = z.eingangBreite / 2;
+        const nachSueden = Math.atan2(z.ux, z.uz), nachNorden = Math.atan2(-z.ux, -z.uz), nachOsten = Math.atan2(z.ox, z.oz);
+        const SITZ = -0.38;   // Körper so weit absenken, dass die Hüfte auf Sitzhöhe ist
+        const gang = 0.9;     // Weg zwischen Tanzfläche und Bänken
+        const rein = [P(el, b2 + 1.0), P(el, b2 - 1.0), P(el, gang)];
+
+        // Sitzplätze an den Bierbänken (wie in rundgang.js aufgestellt): je Reihe zwei Tische,
+        // je Tisch zwei Bänke mit drei Plätzen; Weg über den Gang zwischen den Reihen
+        const plaetze = [];
+        for (let l = innen.buehne.von[1] + 1.2; l + 0.8 < el - t2; l += 2.4) {
+            for (const tq of [b2 - 1.3, b2 - 3.55]) {
+                for (const seite of [-1, 1]) {
+                    const sl = l + seite * 0.65, gl = l + seite * 1.2;
+                    for (const dq of [-0.7, 0, 0.7]) {
+                        const ziel = P(sl, tq + dq);
+                        plaetze.push({
+                            weg: [P(gl, gang), P(gl, tq + dq)],
+                            ziel: { ...ziel, richtung: seite < 0 ? nachSueden : nachNorden },
+                            sitzt: true, yZusatz: SITZ, abstand: Math.abs(sl - el),
+                        });
+                    }
+                }
+            }
+        }
+        // Wer zuerst hereinkommt, geht nach hinten durch
+        plaetze.sort((a, b) => b.abstand - a.abstand);
+
+        // Königsbühne: Stühle des Königspaars, Blick nach Osten ins Zelt
+        const k = innen.koenigsbuehne;
+        const kl = (k.von[0] + k.von[1]) / 2, kq = (k.von[2] + k.von[3]) / 2;
+        const buehneOben = Math.max(...[[k.von[0], k.von[2]], [k.von[1], k.von[2]], [k.von[1], k.von[3]], [k.von[0], k.von[3]]]
+            .map(([l, q]) => boden(l, q))) + k.hoehe;
+        const stuhl = l => {
+            const ziel = P(l, kq - 0.4);
+            return { weg: [P(l, k.von[3] + 0.6)], ziel: { ...ziel, richtung: nachOsten }, sitzt: true,
+                yZusatz: buehneOben + 0.5 - 0.86 - hoehe(ziel.x, ziel.z) };
+        };
+
+        // Theke: Plätze davor, Blick zur Theke
+        const t = innen.theke;
+        const theke = [-3, -1.8, -0.6, 0.6, 1.8, 3].map(q => ({
+            weg: [], ziel: { ...P(t.von[0] - 0.45, q), richtung: nachSueden }, sitzt: false, yZusatz: 0,
+        }));
+
+        let zurTheke = U.schuetzenZurTheke;
+        let reihenfolge = 0;
+        // Wer im Zug vorn läuft, ist zuerst am Eingang
+        for (const p of [...personen].sort((a, b) => a.ab - b.ab || a.q - b.q)) {
+            let platz;
+            if (p === koenigspaar[0]) platz = stuhl(kl - 0.4);
+            else if (p === koenigspaar[1]) platz = stuhl(kl + 0.4);
+            else if (p.band === 'weiß' && zurTheke > 0 && theke.length) { platz = theke.shift(); zurTheke--; }
+            else platz = plaetze.shift() || theke.shift();
+            if (!platz) continue;
+            p.einzug = {
+                warte: reihenfolge++ * 0.6,
+                wege: [...rein, ...platz.weg, platz.ziel],
+                sitzt: platz.sitzt, yZusatz: platz.yZusatz,
+            };
+        }
+    }
+
+    // Weiter auf dem Einzugsweg; true, wenn der Platz erreicht ist
+    function einziehen(p, dt) {
+        const e = p.einzug;
+        if (!e) return true;
+        if (e.fertig) return true;
+        if (e.warte > 0) { e.warte -= dt; return false; }
+        const ziel = e.wege[0];
+        const letztes = e.wege.length === 1;
+        if (hingehen(p, { x: ziel.x, z: ziel.z, richtung: letztes ? ziel.richtung : p.richtung }, 1.3 * dt)) {
+            e.wege.shift();
+            if (!e.wege.length) {
+                e.fertig = true;
+                p.sitzt = e.sitzt;
+                p.yZusatz = e.yZusatz;
+                return true;
+            }
+        }
+        return false;
+    }
+
     function starten() {
         const route = routePlanen(zustand.adresse);
         if (!route) {
@@ -804,6 +942,7 @@
         zustand.sKopf = 0;
         zustand.zeit = 0;
         zustand.phase = 'treffen';
+        hinsetzenZuruecksetzen();
         // Lose Gruppe rund um den Körter
         const mitte = [koerterAndock.x, koerterAndock.z];
         for (const p of personen) {
@@ -825,6 +964,7 @@
         zustand.route = null;
         zuschauer = [];
         feuerwehrAbbauen();
+        hinsetzenZuruecksetzen();
         koenigspaarAnDieTuer();
         musikStoppen();
     }
@@ -871,6 +1011,13 @@
                 zustand.wartet = (zustand.wartet || 0) + dt;
                 if (zustand.wartet > 3) { zustand.phase = 'marsch2'; zustand.zeit = 0; zustand.wartet = 0; }
             }
+        } else if (zustand.phase === 'angekommen') {
+            // Kurz vor dem Zelt stehen bleiben, dann einziehen
+            if (zustand.zeit > 4) { einzugPlanen(); zustand.phase = 'einzug'; zustand.zeit = 0; }
+        } else if (zustand.phase === 'einzug') {
+            let alleDa = true;
+            for (const p of personen) if (!einziehen(p, dt)) alleDa = false;
+            if (alleDa) { zustand.phase = 'imZelt'; zustand.zeit = 0; }
         }
 
         // Formation entlang des Weges
@@ -898,7 +1045,7 @@
         figurenZeichnen(zustand.phase !== 'aus');
         zuschauerZeichnen();
         const k = koenigspaar[0];
-        schild.position.set((k.x + koenigspaar[1].x) / 2, hoehe(k.x, k.z) + 3.2, (k.z + koenigspaar[1].z) / 2);
+        schild.position.set((k.x + koenigspaar[1].x) / 2, hoehe(k.x, k.z) + (k.yZusatz || 0) + 3.2, (k.z + koenigspaar[1].z) / 2);
         statusSetzen(STATUS[zustand.phase]);
         musikLautstaerke();
     }

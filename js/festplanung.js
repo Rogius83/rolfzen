@@ -24,6 +24,21 @@ const ROLFZEN_FEST = {
         // Getränkekühlschränke links und rechts neben der Königsbühne (laengs, quer)
         kuehlschraenke: [[-3.6, -5.9], [3.6, -5.9]],
         theke: { name: 'Getränke', von: [11.6, 12.4, -4.5, 4.5], hoehe: 1.1 },          // Süden
+        // Preistafel über der Theke (Beispielpreise, bitte anpassen)
+        preise: [
+            ['Bier 0,3 l', '2,50 €'], ['Bier 0,5 l', '4,00 €'], ['Cola 0,3 l', '2,50 €'],
+            ['Fanta 0,3 l', '2,50 €'], ['Apfelschorle 0,3 l', '2,50 €'], ['Wasser 0,5 l', '2,00 €'],
+            ['Korn 2 cl', '2,00 €'],
+        ],
+        // Zwei Bildschirme links und rechts neben der Theke unter der Decke; wechselnde Werbung
+        werbung: [
+            { titel: 'Wok', text: 'Nudeln to go – frisch aus dem Wok', farbe: '#d4380d' },
+            { titel: 'Pizza', text: 'Heiß und knusprig – gleich vor dem Zelt', farbe: '#2e7d32' },
+            { titel: 'Pommes & Bratwurst', text: 'Der Klassiker vom Grill', farbe: '#f9a825' },
+            { titel: 'Veltins', text: 'Frisch gezapft an der Bierbude', farbe: '#1f7a3a' },
+            { titel: 'Süßigkeiten', text: 'Gebrannte Mandeln & Zuckerwatte', farbe: '#e91e8c' },
+        ],
+        werbungWechsel: 6,  // Sekunden je Anzeige
         stehtische: [[8.8, -3.6], [8.8, -1.2], [8.8, 1.2], [8.8, 3.6]],
     },
     // Offizierhaus: Öffnung auf der Westseite (zum Platz) mit zwei Toiletten
@@ -80,6 +95,10 @@ const ROLFZEN_FEST = {
         koenigStandard: 'Entruper Weg 7',
         // Sperrt die Hauptstraße an beiden Enden des Abschnitts, den der Umzug benutzt
         feuerwehr: { fahrzeuge: 2, leuteJeFahrzeug: 3 },
+        // Schützen in schwarzem Anzug; je ein Drittel mit weißem, rotem und grünem Hutband (in dieser Reihenfolge)
+        hutbaender: [['weiß', '#f2f2f2'], ['rot', '#c8102e'], ['grün', '#2e8b3a']],
+        schuetzenZurTheke: 6,   // so viele Schützen mit weißem Band gehen im Zelt zur Theke
+        zuschauerAmPlatz: 24,   // Zuschauer, die am Schützenplatz auf den Umzug warten (Handy: halb so viele)
         fahnentraeger: 2,
         musiker: 12,
         schuetzen: 36,

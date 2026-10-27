@@ -660,6 +660,8 @@
     })();
     const hindernisse = [];   // Ringe von Buden und Karussell, für inGebaeude
     let karussell = null;
+    const bildschirme = [];   // Werbe-Bildschirme im Zelt, wechseln in der Hauptschleife
+    let werbeZeit = 0;
 
     // Kollisionskanten eines geschlossenen Rings (ohne die Kanten, die ausgelassen werden sollen)
     function kantenEinfuegen(ring, ohne) {
@@ -782,17 +784,76 @@
             beschriftung('Königspaar', x, z, ko + 2.8, 3.2, 'rgba(120, 90, 10, 0.9)');
         }
 
-        // Süden: Getränketheke mit Regal dahinter, davor Stehtische
+        // Süden: Getränketheke mit Regal dahinter, davor Stehtische (Beschriftung trägt die Preistafel)
         const t = innen.theke;
         podest(t.von, t.hoehe, theke);
         quader(t.von[1] + 1.1, (t.von[2] + t.von[3]) / 2, 0.4, t.von[3] - t.von[2], 2, holz);
-        {
-            const [x, z] = zelt.punkt((t.von[0] + t.von[1]) / 2, 0);
-            beschriftung(t.name, x, z, bodenBei(t.von[0], 0) + 2.8, 3, 'rgba(110, 30, 20, 0.85)');
-        }
         for (const [l, q] of innen.stehtische) {
             quader(l, q, 0.08, 0.08, 1.1, metall);
             quader(l, q, 0.8, 0.8, 0.04, farbe('#f4f3ee'), bodenBei(l, q) + 1.1);
+        }
+
+        // Preistafel über dem Regal hinter der Theke und zwei Werbe-Bildschirme unter der Decke;
+        // alle zeigen nach Norden ins Zelt
+        const insZelt = Math.atan2(-ux, -uz);
+        const tafel = (breite, hoehe, textur, l, q, y) => {
+            const m = new THREE.Mesh(new THREE.PlaneGeometry(breite, hoehe), new THREE.MeshBasicMaterial({ map: textur }));
+            const [x, z] = zelt.punkt(l, q);
+            m.position.set(x, y, z);
+            m.rotation.y = insZelt;
+            szene.add(m);
+            return m;
+        };
+        {
+            const leinwand = document.createElement('canvas');
+            leinwand.width = 640; leinwand.height = 512;
+            const ctx = leinwand.getContext('2d');
+            ctx.fillStyle = '#1d2b22';
+            ctx.fillRect(0, 0, 640, 512);
+            ctx.strokeStyle = '#c9a227';
+            ctx.lineWidth = 10;
+            ctx.strokeRect(10, 10, 620, 492);
+            ctx.fillStyle = '#ffd23f';
+            ctx.font = 'bold 54px Segoe UI, Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Getränke', 320, 72);
+            ctx.font = '38px Segoe UI, Arial';
+            innen.preise.forEach(([sorte, preis], i) => {
+                const y = 140 + i * 52;
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'left';
+                ctx.fillText(sorte, 50, y);
+                ctx.textAlign = 'right';
+                ctx.fillText(preis, 590, y);
+            });
+            const t = innen.theke;
+            tafel(2.4, 1.92, new THREE.CanvasTexture(leinwand), t.von[1] + 0.85, 0, bodenBei(t.von[1] + 1.1, 0) + 3.05);
+        }
+        {
+            const t = innen.theke, l = (t.von[0] + t.von[1]) / 2;
+            const texturen = innen.werbung.map(w => {
+                const leinwand = document.createElement('canvas');
+                leinwand.width = 640; leinwand.height = 360;
+                const ctx = leinwand.getContext('2d');
+                ctx.fillStyle = w.farbe;
+                ctx.fillRect(0, 0, 640, 360);
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+                ctx.fillRect(0, 250, 640, 110);
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.font = 'bold 84px Segoe UI, Arial';
+                ctx.fillText(w.titel, 320, 160, 600);
+                ctx.font = '34px Segoe UI, Arial';
+                ctx.fillText(w.text, 320, 315, 600);
+                return new THREE.CanvasTexture(leinwand);
+            });
+            [-5.6, 5.6].forEach((q, i) => {
+                const y = bodenBei(l, q) + 2.5;
+                quader(l + 0.05, q, 0.08, 1.75, 1.05, schwarz, y - 0.525);
+                for (const dq of [-0.6, 0.6]) quader(l + 0.05, q + dq, 0.02, 0.02, 0.9, metall, y + 0.5);
+                const bild = tafel(1.6, 0.9, texturen[i % texturen.length], l - 0.01, q, y);
+                bildschirme.push({ bild, texturen, index: i });
+            });
         }
 
         // Bierzeltgarnituren quer zur Zeltachse an der Ostwand zwischen Bandbühne und Eingang,
@@ -1614,6 +1675,15 @@
         groesseAnpassen();
         bewegen(dt);
         if (karussell) karussell.rotation.y += dt * 0.7;
+        // Werbung auf den Bildschirmen weiterschalten
+        werbeZeit += dt;
+        if (werbeZeit > ROLFZEN_FEST.innen.werbungWechsel) {
+            werbeZeit = 0;
+            for (const b of bildschirme) {
+                b.index = (b.index + 1) % b.texturen.length;
+                b.bild.material.map = b.texturen[b.index];
+            }
+        }
         for (const aktualisieren of erweiterungen.proBild) aktualisieren(dt);
         kameraNachfuehren();
         // Auf dem Handy nur etwa zehnmal pro Sekunde neu zeichnen
