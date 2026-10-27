@@ -944,9 +944,10 @@
     function andereMusikAus() {
         gloriaStoppen();
         liedStoppen();
-        if (musik.haupt) {
-            musik.haupt.gain.cancelScheduledValues(musik.ctx.currentTime);
-            musik.haupt.gain.setValueAtTime(0, musik.ctx.currentTime);
+        for (const regler of [musik.haupt && musik.haupt.gain, heidecksburg.quelle && heidecksburg.lautstaerke.gain]) {
+            if (!regler) continue;
+            regler.cancelScheduledValues(musik.ctx.currentTime);
+            regler.setValueAtTime(0, musik.ctx.currentTime);
         }
     }
 
@@ -1035,7 +1036,8 @@
             musik.takt = 0;
             clearInterval(musik.timer);
             musik.timer = setInterval(() => { try { planen(); } catch (fehler) { musikStoppen(); } }, 50);
-            gloriaLaden();
+            aufnahmeLaden(heidecksburg, 'musik/hoch-heidecksburg.mp3');
+            aufnahmeLaden(gloria, 'musik/preussens-gloria.mp3');
         } catch (fehler) {
             musik.ctx = null;
         }
@@ -1045,6 +1047,7 @@
         clearInterval(musik.timer);
         musik.timer = null;
         if (musik.haupt) musik.haupt.gain.value = 0;
+        heidecksburgStoppen();
         gloriaStoppen();
         liedStoppen();
     }
@@ -1054,13 +1057,14 @@
     // die ersten 35 Sekunden, am Ende ausgeblendet
     const gloria = { puffer: null, laden: null, quelle: null, lautstaerke: null };
 
-    function gloriaLaden() {
-        if (gloria.puffer || gloria.laden || !musik.ctx) return;
-        gloria.laden = fetch('musik/preussens-gloria.mp3')
+    // Aufnahme einmal laden und dekodieren
+    function aufnahmeLaden(aufnahme, url) {
+        if (aufnahme.puffer || aufnahme.laden || !musik.ctx) return;
+        aufnahme.laden = fetch(url)
             .then(antwort => antwort.arrayBuffer())
             .then(daten => new Promise((ok, fehler) => musik.ctx.decodeAudioData(daten, ok, fehler)))
-            .then(puffer => { gloria.puffer = puffer; })
-            .catch(() => { gloria.laden = null; });
+            .then(puffer => { aufnahme.puffer = puffer; })
+            .catch(() => { aufnahme.laden = null; });
     }
 
     function gloriaSpielen() {
@@ -1088,6 +1092,32 @@
         }
     }
 
+    // Standard-Marsch: „Hoch Heidecksburg“ (Rudolf Herzer), 1. Vollmershainer Schalmeienverein (2013),
+    // Public Domain Mark, Internet Archive; Ausschnitt 0:20–1:50 in Schleife.
+    // Lädt die Datei nicht, spielt stattdessen die im Browser erzeugte Marschmusik.
+    const heidecksburg = { puffer: null, laden: null, quelle: null, lautstaerke: null };
+
+    function heidecksburgStarten() {
+        if (heidecksburg.quelle || !heidecksburg.puffer) return;
+        const c = musik.ctx;
+        const quelle = c.createBufferSource(), lautstaerke = c.createGain();
+        quelle.buffer = heidecksburg.puffer;
+        quelle.loop = true;
+        lautstaerke.gain.value = 0;
+        quelle.connect(lautstaerke);
+        lautstaerke.connect(c.destination);
+        quelle.start();
+        heidecksburg.quelle = quelle;
+        heidecksburg.lautstaerke = lautstaerke;
+    }
+
+    function heidecksburgStoppen() {
+        if (heidecksburg.quelle) {
+            try { heidecksburg.quelle.stop(); } catch (fehler) { /* schon beendet */ }
+            heidecksburg.quelle = null;
+        }
+    }
+
     // Lautstärke nach Entfernung zur Kapelle; der Marsch spielt beim Marschieren und Abholen
     // und schweigt, solange „Hoch soll er leben“ oder „Preußens Gloria“ läuft
     function musikLautstaerke() {
@@ -1095,13 +1125,15 @@
         const kapellmeister = personen[5];
         const d = Math.hypot(kapellmeister.x - R.spieler.x, kapellmeister.z - R.spieler.z);
         const nah = Math.max(0, 1 - d / 300);
-        if (musik.haupt && musik.timer) {
-            const spielt = ['marsch1', 'abholen', 'marsch2'].includes(zustand.phase) && zustand.musik
-                && !gloria.quelle && !liedLaeuft();
-            musik.haupt.gain.setTargetAtTime(spielt ? 0.35 * nah : 0, musik.ctx.currentTime, 0.3);
-        }
-        if (gloria.quelle) gloria.lautstaerke.gain.setTargetAtTime(0.8 * nah, musik.ctx.currentTime, 0.2);
-        if (lied.ausgang) lied.ausgang.gain.setTargetAtTime(0.4 * nah, musik.ctx.currentTime, 0.2);
+        const jetzt = musik.ctx.currentTime;
+        const marsch = ['marsch1', 'abholen', 'marsch2'].includes(zustand.phase) && zustand.musik
+            && !gloria.quelle && !liedLaeuft();
+        const aufnahme = !!heidecksburg.puffer;
+        if (marsch && aufnahme) heidecksburgStarten();
+        if (musik.haupt && musik.timer) musik.haupt.gain.setTargetAtTime(marsch && !aufnahme ? 0.35 * nah : 0, jetzt, 0.3);
+        if (heidecksburg.quelle) heidecksburg.lautstaerke.gain.setTargetAtTime(marsch ? 0.7 * nah : 0, jetzt, 0.3);
+        if (gloria.quelle) gloria.lautstaerke.gain.setTargetAtTime(0.8 * nah, jetzt, 0.2);
+        if (lied.ausgang) lied.ausgang.gain.setTargetAtTime(0.4 * nah, jetzt, 0.2);
     }
 
     // ---------- Bedienfeld ----------
@@ -1210,6 +1242,6 @@
         zustand, personen, adressen, routePlanen, starten, stoppen, aktualisieren, adresseWaehlen, wegSuchen, zeltZugang,
         get zuschauer() { return zuschauer; },
         get feuerwehr() { return feuerwehr; },
-        gloria, musik, lied, liedLaeuft,
+        gloria, heidecksburg, musik, lied, liedLaeuft,
     };
 })();
