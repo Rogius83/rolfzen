@@ -617,70 +617,91 @@
         return [(lon - u.lon) * u.mProGradLon, -(lat - u.lat) * u.mProGradLat];
     }
 
+    // Zelt-Koordinaten: l längs (positiv Richtung Süden), q quer (positiv Richtung Osten)
     const zelt = (() => {
         const z = ROLFZEN_FEST.zelt;
         const [mx, mz] = lokal(z.lat, z.lon);
-        const w = z.ausrichtung * Math.PI / 180;
-        const ux = Math.sin(w), uz = -Math.cos(w), vx = -uz, vz = ux;
+        const { ux, uz, ox, oz } = festAchsen(z.ausrichtung);
         const ring = festRechteck(z.laenge, z.breite, z.ausrichtung).map(([x, zz]) => [mx + x, mz + zz]);
-        // Eingang in der Mitte der Stirnseite in Richtung der Längsachse (Süden, zum Weg)
-        const eingang = [mx + ux * z.laenge / 2, mz + uz * z.laenge / 2];
-        return { ...z, mx, mz, ux, uz, vx, vz, ring, eingang, eingangBreite: 4 };
+        const punkt = (l, q) => [mx + l * ux + q * ox, mz + l * uz + q * oz];
+        // Eingang in der Mitte der östlichen Längsseite, zum Asphaltplatz
+        const eingang = punkt(0, z.breite / 2);
+        const platz = ROLFZEN_FEST.platz.map(([l, q]) => punkt(l, q));
+        return { ...z, mx, mz, ux, uz, ox, oz, ring, punkt, eingang, eingangBreite: 4, platz };
     })();
+    const hindernisse = [];   // Ringe von Buden und Karussell, für inGebaeude
+    let karussell = null;
+
+    // Kollisionskanten eines geschlossenen Rings (ohne die Kanten, die ausgelassen werden sollen)
+    function kantenEinfuegen(ring, ohne) {
+        for (let i = 0; i < ring.length; i++) {
+            if (ohne && ohne.includes(i)) continue;
+            const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % ring.length];
+            gebaeudeRaster.einfuegen({ ax, az, bx, bz, ring },
+                Math.min(ax, bx) - 1, Math.min(az, bz) - 1, Math.max(ax, bx) + 1, Math.max(az, bz) + 1);
+        }
+    }
+
+    // Quader mit beliebiger Ausrichtung: Mitte (x, z), Achsen a (Breite) und b (Tiefe), Unterkante y0
+    function quaderBauen(bauer, x, z, a, b, breite, tiefe, y0, h, f, ohneDeckel) {
+        const e = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) =>
+            [x + a[0] * s * breite / 2 + b[0] * t * tiefe / 2, z + a[1] * s * breite / 2 + b[1] * t * tiefe / 2]);
+        for (let i = 0; i < 4; i++) {
+            const p = e[i], q = e[(i + 1) % 4];
+            bauer.viereck([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y0 + h, q[1]], [p[0], y0 + h, p[1]], f);
+        }
+        if (!ohneDeckel) bauer.viereck(...e.map(([px, pz]) => [px, y0 + h, pz]), f);
+        return e;
+    }
 
     function zeltBauen() {
         const bauer = new GeometrieBauer();
-        const { mx, mz, ux, uz, vx, vz, laenge, breite } = zelt;
-        const p = (u, v, y) => [mx + u * ux + v * vx, y, mz + u * uz + v * vz];
-        const bodenBei = (u, v) => { const q = p(u, v, 0); return hoehe(q[0], q[2]); };
+        const { ux, uz, ox, oz, laenge, breite } = zelt;
+        const p = (l, q, y) => { const [x, z] = zelt.punkt(l, q); return [x, y, z]; };
+        const bodenBei = (l, q) => { const [x, z] = zelt.punkt(l, q); return hoehe(x, z); };
         const weiss = farbe('#f4f3ee'), gruen = farbe('#2f5a34'), holz = farbe('#8a6a45'), theke = farbe('#6b4a2e');
         const boden = zelt.ring.map(([x, z]) => hoehe(x, z));
         const unten = Math.min(...boden) - 0.3, oben = Math.max(...boden) + 3;
         const l2 = laenge / 2, b2 = breite / 2, t2 = zelt.eingangBreite / 2;
 
-        // Wände; an der Stirnseite u = +l2 bleibt der Eingang offen (bis 2,5 m Höhe)
+        // Wände; an der Ostseite (q = +b2) bleibt der Eingang offen (bis 2,5 m Höhe)
         const wand = (a, b, y0, y1, f) => bauer.viereck(p(a[0], a[1], y0), p(b[0], b[1], y0), p(b[0], b[1], y1), p(a[0], a[1], y1), f);
         wand([-l2, -b2], [l2, -b2], unten, oben, weiss);
-        wand([-l2, b2], [l2, b2], unten, oben, weiss);
         wand([-l2, -b2], [-l2, b2], unten, oben, weiss);
-        wand([l2, -b2], [l2, -t2], unten, oben, weiss);
-        wand([l2, t2], [l2, b2], unten, oben, weiss);
-        wand([l2, -t2], [l2, t2], bodenBei(l2, 0) + 2.5, oben, weiss);
+        wand([l2, -b2], [l2, b2], unten, oben, weiss);
+        wand([-l2, b2], [-t2, b2], unten, oben, weiss);
+        wand([t2, b2], [l2, b2], unten, oben, weiss);
+        wand([-t2, b2], [t2, b2], bodenBei(0, b2) + 2.5, oben, weiss);
         // Grünes Band an der Traufe
         for (const [a, b] of [[[-l2, -b2], [l2, -b2]], [[-l2, b2], [l2, b2]], [[-l2, -b2], [-l2, b2]], [[l2, -b2], [l2, b2]]]) {
             const f = 1.003;
             wand([a[0] * f, a[1] * f], [b[0] * f, b[1] * f], oben - 0.5, oben, gruen);
         }
-        // Dach über dem Rechteck (Längsachse u)
-        const uc = mx * ux + mz * uz, vc = mx * vx + mz * vz;
-        spitzdachBauen(bauer, { ux, uz, vx, vz, u0: uc - l2, u1: uc + l2, v0: vc - b2, v1: vc + b2 },
+        // Dach über dem Rechteck (Längsachse u, Querachse o)
+        const uc = zelt.mx * ux + zelt.mz * uz, oc = zelt.mx * ox + zelt.mz * oz;
+        spitzdachBauen(bauer, { ux, uz, vx: ox, vz: oz, u0: uc - l2, u1: uc + l2, v0: oc - b2, v1: oc + b2 },
             oben, 'gabled', weiss, weiss);
 
-        // Quader in Zelt-Koordinaten (u, v), Unterkante auf dem Gelände
-        function quader(u, v, lu, lv, h, f, y) {
-            const y0 = y !== undefined ? y : bodenBei(u, v), y1 = y0 + h;
-            const e = [[u - lu / 2, v - lv / 2], [u + lu / 2, v - lv / 2], [u + lu / 2, v + lv / 2], [u - lu / 2, v + lv / 2]];
-            for (let i = 0; i < 4; i++) {
-                const a = e[i], b = e[(i + 1) % 4];
-                bauer.viereck(p(a[0], a[1], y0), p(b[0], b[1], y0), p(b[0], b[1], y1), p(a[0], a[1], y1), f);
-            }
-            bauer.viereck(p(e[0][0], e[0][1], y1), p(e[1][0], e[1][1], y1), p(e[2][0], e[2][1], y1), p(e[3][0], e[3][1], y1), f);
-        }
-        // Bierzeltgarnituren in drei Reihen, Theke an der Nordseite
-        for (const v of [-4.5, 0, 4.5]) {
-            for (let u = -l2 + 5; u < l2 - 4; u += 2.6) {
-                const y = bodenBei(u, v);
-                quader(u, v, 2.2, 0.6, 0.75, holz, y);
-                quader(u, v - 0.65, 2.2, 0.25, 0.45, holz, y);
-                quader(u, v + 0.65, 2.2, 0.25, 0.45, holz, y);
+        const u = [ux, uz], o = [ox, oz];
+        const quader = (l, q, lu, lq, h, f, y) => {
+            const [x, z] = zelt.punkt(l, q);
+            quaderBauen(bauer, x, z, u, o, lu, lq, y !== undefined ? y : bodenBei(l, q), h, f);
+        };
+        // Bierzeltgarnituren in drei Reihen; vor dem Eingang bleibt ein Gang frei. Theke an der Nordseite.
+        for (const q of [-4, 0, 4]) {
+            for (let l = -l2 + 4.5; l < l2 - 3.5; l += 2.6) {
+                if (q >= 0 && Math.abs(l) < t2 + 1) continue;
+                const y = bodenBei(l, q);
+                quader(l, q, 2.2, 0.6, 0.75, holz, y);
+                quader(l, q - 0.65, 2.2, 0.25, 0.45, holz, y);
+                quader(l, q + 0.65, 2.2, 0.25, 0.45, holz, y);
             }
         }
         quader(-l2 + 1.2, 0, 1, 6, 1.1, theke);
         // Fahnenmasten links und rechts vom Eingang
-        for (const v of [-t2 - 1.5, t2 + 1.5]) {
-            quader(l2 + 1.5, v, 0.15, 0.15, 8, farbe('#dddddd'));
-            const y = bodenBei(l2 + 1.5, v) + 6.6;
-            quader(l2 + 1.5, v + (v > 0 ? 0.8 : -0.8), 0.05, 1.5, 1.0, v > 0 ? weiss : gruen, y);
+        for (const l of [-t2 - 1.5, t2 + 1.5]) {
+            quader(l, b2 + 1.5, 0.15, 0.15, 8, farbe('#dddddd'));
+            quader(l + (l > 0 ? 0.8 : -0.8), b2 + 1.5, 1.5, 0.05, 1.0, l > 0 ? weiss : gruen, bodenBei(l, b2 + 1.5) + 6.6);
         }
 
         const mesh = bauer.mesh(vertexMaterial());
@@ -688,18 +709,116 @@
         mesh.receiveShadow = true;
         szene.add(mesh);
 
-        // Kollision: alle Wände außer dem Eingang
-        const kanten = [[[-l2, -b2], [l2, -b2]], [[-l2, b2], [l2, b2]], [[-l2, -b2], [-l2, b2]],
-            [[l2, -b2], [l2, -t2]], [[l2, t2], [l2, b2]]];
-        for (const [a, b] of kanten) {
-            const [ax, , az] = p(a[0], a[1], 0), [bx, , bz] = p(b[0], b[1], 0);
-            gebaeudeRaster.einfuegen({ ax, az, bx, bz, ring: zelt.ring },
-                Math.min(ax, bx) - 1, Math.min(az, bz) - 1, Math.max(ax, bx) + 1, Math.max(az, bz) + 1);
+        // Kollision: alle Wände außer dem Eingang (Ring: NW, NO, SO, SW -> Ostseite ist Kante 1)
+        const nw = zelt.punkt(-l2, -b2), no = zelt.punkt(-l2, b2), so = zelt.punkt(l2, b2), sw = zelt.punkt(l2, -b2);
+        kantenEinfuegen([sw, nw, no, zelt.punkt(-t2, b2)], [3]);
+        kantenEinfuegen([zelt.punkt(t2, b2), so, sw], [2]);
+
+        festplatzBauen();
+    }
+
+    // Asphaltplatz, Buden und Kinderkarussell vor dem Zelteingang
+    function festplatzBauen() {
+        const F = ROLFZEN_FEST;
+        // Asphalt: Dreiecke so lange teilen, bis sie dem Gelände folgen (Kanten unter 2,5 m)
+        const asphalt = new GeometrieBauer();
+        const grau = farbe('#5b5d61');
+        const kontur = zelt.platz.map(([x, z]) => new THREE.Vector2(x, z));
+        const teilen = (a, b, c, tiefe) => {
+            const lang = Math.max(Math.hypot(a[0] - b[0], a[1] - b[1]), Math.hypot(b[0] - c[0], b[1] - c[1]), Math.hypot(c[0] - a[0], c[1] - a[1]));
+            if (lang < 2.5 || tiefe > 6) {
+                asphalt.dreieck(...[a, b, c].map(([x, z]) => GeometrieBauer.aufGelaende(x, z, 0.17)), grau);
+                return;
+            }
+            const m = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+            const ab = m(a, b), bc = m(b, c), ca = m(c, a);
+            teilen(a, ab, ca, tiefe + 1); teilen(ab, b, bc, tiefe + 1); teilen(ca, bc, c, tiefe + 1); teilen(ab, bc, ca, tiefe + 1);
+        };
+        for (const [i, j, k] of THREE.ShapeUtils.triangulateShape(kontur, [])) {
+            teilen(zelt.platz[i], zelt.platz[j], zelt.platz[k], 0);
         }
+        bodenEbene(asphalt.mesh(vertexMaterial()), -3);
+
+        // Buden: Rückseite und Seiten, Theke vorn, gestreifte Markise, Schild; Front zur Platzmitte
+        const bauer = new GeometrieBauer();
+        const mitte = zelt.punkt(0, 14);
+        const weiss = farbe('#f6f4ee'), holz = farbe('#8a6a45');
+        for (const b of F.buden) {
+            const [x, z] = zelt.punkt(b.laengs, b.quer);
+            let fx = mitte[0] - x, fz = mitte[1] - z;
+            const fl = Math.hypot(fx, fz); fx /= fl; fz /= fl;
+            const sx = -fz, sz = fx, tiefe = 2.2;
+            const ecken = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) => [x + sx * s * b.breite / 2 + fx * t * tiefe / 2, z + sz * s * b.breite / 2 + fz * t * tiefe / 2]);
+            const y0 = Math.min(...ecken.map(([px, pz]) => hoehe(px, pz))) - 0.2;
+            const farbig = farbe(b.farbe);
+            quaderBauen(bauer, x, z, [sx, sz], [fx, fz], b.breite, tiefe, y0, 2.6, weiss);
+            quaderBauen(bauer, x, z, [sx, sz], [fx, fz], b.breite + 0.1, tiefe + 0.1, y0 + 2.6, 0.25, farbig);
+            // Theke vor der offenen Front
+            quaderBauen(bauer, x + fx * (tiefe / 2 + 0.25), z + fz * (tiefe / 2 + 0.25), [sx, sz], [fx, fz], b.breite - 0.2, 0.5, y0, 1.05, holz);
+            // Markise in sechs Streifen, von der Oberkante schräg nach vorn
+            const vorn = tiefe / 2, y1 = y0 + 2.6, streifen = 6;
+            for (let i = 0; i < streifen; i++) {
+                const s0 = -b.breite / 2 + i * b.breite / streifen, s1 = s0 + b.breite / streifen;
+                const pkt = (s, f, y) => [x + sx * s + fx * f, y, z + sz * s + fz * f];
+                bauer.viereck(pkt(s0, vorn, y1), pkt(s1, vorn, y1), pkt(s1, vorn + 1.1, y1 - 0.45), pkt(s0, vorn + 1.1, y1 - 0.45),
+                    i % 2 ? weiss : farbig);
+            }
+            beschriftung(b.name, x, z, y0 + 3.6, 4, 'rgba(110, 30, 20, 0.85)');
+            hindernisse.push(ecken);
+            kantenEinfuegen(ecken);
+        }
+        const budenMesh = bauer.mesh(vertexMaterial());
+        budenMesh.castShadow = true;
+        budenMesh.receiveShadow = true;
+        szene.add(budenMesh);
+
+        // Kinderkarussell: dreht sich (siehe Hauptschleife)
+        const k = F.karussell;
+        const [kx, kz] = zelt.punkt(k.laengs, k.quer);
+        const ky = hoehe(kx, kz);
+        karussell = new THREE.Group();
+        karussell.position.set(kx, ky, kz);
+        const mat = c => new THREE.MeshLambertMaterial({ color: c });
+        const teil = (geo, m, x, y, z) => { const t = new THREE.Mesh(geo, m); t.position.set(x, y, z); t.castShadow = true; karussell.add(t); return t; };
+        teil(new THREE.CylinderGeometry(k.radius, k.radius, 0.3, 24), mat(0x8a2be2), 0, 0.15, 0);
+        teil(new THREE.CylinderGeometry(0.15, 0.15, 3, 10), mat(0xffd23f), 0, 1.5, 0);
+        teil(new THREE.ConeGeometry(k.radius + 0.4, 1.3, 24), mat(0xe53935), 0, 3.6, 0);
+        teil(new THREE.SphereGeometry(0.25, 10, 8), mat(0xffd23f), 0, 4.35, 0);
+        const sitzFarben = [0xffffff, 0x42a5f5, 0xffca28, 0x66bb6a, 0xef5350, 0xab47bc];
+        for (let i = 0; i < 6; i++) {
+            const w = i / 6 * Math.PI * 2, r = k.radius - 0.6;
+            teil(new THREE.CylinderGeometry(0.03, 0.03, 2.6, 6), mat(0xdddddd), Math.cos(w) * r, 1.6, Math.sin(w) * r);
+            const pferd = teil(new THREE.BoxGeometry(0.3, 0.45, 0.8), mat(sitzFarben[i]), Math.cos(w) * r, 0.9, Math.sin(w) * r);
+            pferd.rotation.y = -w;
+        }
+        szene.add(karussell);
+        const kring = Array.from({ length: 8 }, (_, i) => [kx + Math.cos(i / 8 * Math.PI * 2) * k.radius, kz + Math.sin(i / 8 * Math.PI * 2) * k.radius]);
+        hindernisse.push(kring);
+        kantenEinfuegen(kring);
+        beschriftung(k.name, kx, kz, ky + 5.2, 4, 'rgba(110, 30, 20, 0.85)');
+    }
+
+    // Schwebendes Namensschild
+    function beschriftung(text, x, z, y, breite, hintergrund) {
+        const leinwand = document.createElement('canvas');
+        leinwand.width = 512; leinwand.height = 96;
+        const ctx = leinwand.getContext('2d');
+        ctx.fillStyle = hintergrund;
+        ctx.fillRect(0, 0, 512, 96);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 44px Segoe UI, Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 256, 50, 490);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(leinwand) }));
+        sprite.position.set(x, y, z);
+        sprite.scale.set(breite, breite * 96 / 512, 1);
+        szene.add(sprite);
     }
 
     function inGebaeude(x, z) {
         if (punktInPolygon(x, z, zelt.ring)) return true;
+        if (hindernisse.some(ring => punktInPolygon(x, z, ring))) return true;
         for (const k of gebaeudeRaster.abfragen(x, z)) {
             if (punktInPolygon(x, z, k.ring)) return true;
         }
@@ -746,6 +865,19 @@
         }
         for (const p of D.baeume) laub.push(p);
 
+        // Rund um den Schützenplatz stehen statt erzeugter die im Luftbild eingemessenen Bäume
+        // (dritter Wert: Höhe, aus dem Kronenradius abgeleitet)
+        const weitWeg = p => Math.hypot(p[0] - zelt.mx, p[1] - zelt.mz) > ROLFZEN_FEST.baumUmkreis;
+        for (const liste of [laub, nadel, busch]) {
+            const behalten = liste.filter(weitWeg);
+            liste.length = 0;
+            liste.push(...behalten);
+        }
+        for (const [lat, lon, r] of ROLFZEN_FEST.baeume) {
+            const [x, z] = lokal(lat, lon);
+            laub.push([x, z, Math.min(26, r / 0.32)]);
+        }
+
         const stammMaterial = new THREE.MeshLambertMaterial({ color: 0x5a4030 });
         const kronenMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff });
         const stammGeo = new THREE.CylinderGeometry(0.15, 0.22, 1, 5).translate(0, 0.5, 0);
@@ -789,10 +921,11 @@
         }
 
         const stammPunkte = laub.concat(nadel);
-        const hoehen = stammPunkte.map(() => 6 + zufall() * 7);
+        const hoehen = stammPunkte.map(p => p[2] || 6 + zufall() * 7);
         instanzen(stammGeo, stammMaterial, stammPunkte, (p, i) => {
-            // Stamm etwas in den Boden, damit er am Hang nicht schwebt
-            m.compose(v.set(p[0], hoehe(p[0], p[1]) - 0.3, p[1]), q.identity(), s.set(1, hoehen[i] * 0.45 + 0.3, 1));
+            // Stamm etwas in den Boden, damit er am Hang nicht schwebt; große Bäume mit dickerem Stamm
+            const dick = Math.max(1, hoehen[i] / 10);
+            m.compose(v.set(p[0], hoehe(p[0], p[1]) - 0.3, p[1]), q.identity(), s.set(dick, hoehen[i] * 0.45 + 0.3, dick));
         });
         instanzen(laubGeo, kronenMaterial, laub, (p, i) => {
             const r = hoehen[i] * 0.32;
@@ -1172,6 +1305,14 @@
             pfad(g.p, true);
             mk.fill();
         });
+        pfad(zelt.platz, true);
+        mk.fillStyle = '#8a8a86';
+        mk.fill();
+        for (const ring of hindernisse) {
+            pfad(ring, true);
+            mk.fillStyle = '#c8102e';
+            mk.fill();
+        }
         pfad(zelt.ring, true);
         mk.fillStyle = '#fbf6e2';
         mk.fill();
@@ -1243,6 +1384,7 @@
         const dt = Math.min(uhr.getDelta(), 0.05);
         groesseAnpassen();
         bewegen(dt);
+        if (karussell) karussell.rotation.y += dt * 0.7;
         for (const aktualisieren of erweiterungen.proBild) aktualisieren(dt);
         kameraNachfuehren();
         // Auf dem Handy nur etwa zehnmal pro Sekunde neu zeichnen

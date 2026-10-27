@@ -48,13 +48,32 @@ const orteEbene = L.layerGroup(
 // Schützenfest-Planung (Daten aus js/festplanung.js)
 const festplanung = L.layerGroup().addTo(karte);
 {
-    const z = ROLFZEN_FEST.zelt;
+    const F = ROLFZEN_FEST, z = F.zelt;
     const mProGradLat = 111320, mProGradLon = 111320 * Math.cos(z.lat * Math.PI / 180);
-    const ecken = festRechteck(z.laenge, z.breite, z.ausrichtung)
-        .map(([x, zs]) => [z.lat - zs / mProGradLat, z.lon + x / mProGradLon]);
-    L.polygon(ecken, { color: '#b8860b', weight: 2, fillColor: '#fffbe8', fillOpacity: 0.8 })
-        .bindPopup(`<b>${z.name}</b><br>${z.laenge} × ${z.breite} m`)
+    // Abstand in lokalen Metern (x Ost, z Süd) zur Zeltmitte -> [lat, lon]
+    const geo = ([x, zs]) => [z.lat - zs / mProGradLat, z.lon + x / mProGradLon];
+    const aufPlatz = (laengs, quer) => geo(festVersatz(laengs, quer));
+
+    L.polygon(F.platz.map(([l, q]) => aufPlatz(l, q)), { color: '#555', weight: 1, fillColor: '#777', fillOpacity: 0.55 })
+        .bindPopup('Asphaltplatz')
         .addTo(festplanung);
+    L.polygon(festRechteck(z.laenge, z.breite, z.ausrichtung).map(geo),
+        { color: '#b8860b', weight: 2, fillColor: '#fffbe8', fillOpacity: 0.85 })
+        .bindPopup(`<b>${z.name}</b><br>${z.laenge} × ${z.breite} m, Eingang Ost`)
+        .addTo(festplanung);
+    for (const b of F.buden) {
+        L.circleMarker(aufPlatz(b.laengs, b.quer), { radius: 6, color: '#fff', weight: 1, fillColor: b.farbe, fillOpacity: 1 })
+            .bindTooltip(b.name)
+            .addTo(festplanung);
+    }
+    const k = F.karussell;
+    L.circle(aufPlatz(k.laengs, k.quer), { radius: k.radius, color: '#e91e63', weight: 2, fillOpacity: 0.4 })
+        .bindTooltip(k.name)
+        .addTo(festplanung);
+    for (const [lat, lon, r] of F.baeume) {
+        L.circle([lat, lon], { radius: r, color: '#2e7d32', weight: 1, fillColor: '#43a047', fillOpacity: 0.25 })
+            .addTo(festplanung);
+    }
 }
 
 L.control.layers(

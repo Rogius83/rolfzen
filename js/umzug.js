@@ -23,11 +23,29 @@
     const unbefestigt = s => s.t === 'track' || s.t === 'path' || s.t === 'footway' || s.t === 'steps';
     const schluessel = ([x, z]) => x + ',' + z;
 
+    function imZelt(x, z) {
+        const poly = zelt.ring;
+        let innen = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const [xi, zi] = poly[i], [xj, zj] = poly[j];
+            if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) innen = !innen;
+        }
+        return innen;
+    }
+    // Straßenstücke unter dem Zelt sind gesperrt (das Ende der Straße An der Lehmkuhle)
+    function durchsZelt(a, b) {
+        const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        for (let d = 0; d <= l; d += 1) {
+            if (imZelt(a[0] + (b[0] - a[0]) * d / l, a[1] + (b[1] - a[1]) * d / l)) return true;
+        }
+        return false;
+    }
+
     for (const s of D.strassen) {
         const faktor = unbefestigt(s) ? 2.5 : 1;
         for (let i = 0; i < s.p.length - 1; i++) {
             const a = schluessel(s.p[i]), b = schluessel(s.p[i + 1]);
-            if (a === b) continue;
+            if (a === b || durchsZelt(s.p[i], s.p[i + 1])) continue;
             for (const [k, p] of [[a, s.p[i]], [b, s.p[i + 1]]]) {
                 if (!knoten.has(k)) knoten.set(k, { x: p[0], z: p[1], nachbarn: [] });
             }
@@ -154,6 +172,16 @@
             const t = (s - this.s[i]) / l;
             return [p[i][0] + (p[i + 1][0] - p[i][0]) * t, p[i][1] + (p[i + 1][1] - p[i][1]) * t];
         }
+        // Nächster Punkt des Weges zu (x, z) mit seiner Bogenlänge s
+        naechstes(x, z) {
+            let beste = null;
+            for (let i = 0; i < this.p.length - 1; i++) {
+                const [ax, az] = this.p[i], [bx, bz] = this.p[i + 1];
+                const r = R.naechsterPunktAufStrecke(x, z, ax, az, bx, bz);
+                if (!beste || r.d < beste.d) beste = { d: r.d, x: r.qx, z: r.qz, s: this.s[i] + Math.hypot(r.qx - ax, r.qz - az) };
+            }
+            return beste;
+        }
         richtung(s) {
             const a = this.punkt(s - 2.5), b = this.punkt(s + 2.5);
             const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -166,9 +194,31 @@
 
     const koerter = D.orte.find(o => o.n.includes('Körter')).p;
     const koerterAndock = andocken(koerter[0], koerter[1], null);
-    const zeltAndock = andocken(zelt.eingang[0], zelt.eingang[1], null);
-    // Treffpunkt vor dem Zelt: 3 m außerhalb des Eingangs
-    const zeltVorplatz = [zelt.eingang[0] + zelt.ux * 3, zelt.eingang[1] + zelt.uz * 3];
+    // Ziel vor dem Zelt: 3,5 m östlich des Eingangs auf dem Asphaltplatz
+    const zeltVorplatz = [zelt.eingang[0] + zelt.ox * 3.5, zelt.eingang[1] + zelt.oz * 3.5];
+
+    // Straße verlassen dort, wo der gerade Weg zum Vorplatz nicht durch Zelt, Buden oder Karussell führt.
+    // (Das Ende der Straße An der Lehmkuhle liegt in OSM unter dem Zelt.)
+    const zeltAndock = (() => {
+        const frei = (x, z) => {
+            const l = Math.hypot(zeltVorplatz[0] - x, zeltVorplatz[1] - z);
+            for (let d = 0; d <= l; d += 0.5) {
+                if (R.inGebaeude(x + (zeltVorplatz[0] - x) * d / l, z + (zeltVorplatz[1] - z) * d / l)) return false;
+            }
+            return true;
+        };
+        const kandidaten = [];
+        for (const seg of segmente) {
+            for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+                const x = seg.ax + (seg.bx - seg.ax) * t, z = seg.az + (seg.bz - seg.az) * t;
+                kandidaten.push({ x, z, seg, d: Math.hypot(x - zeltVorplatz[0], z - zeltVorplatz[1]) });
+            }
+        }
+        kandidaten.sort((a, b) => a.d - b.d);
+        const k = kandidaten.find(c => c.d < 80 && frei(c.x, c.z)) || kandidaten[0];
+        const seg = k.seg;
+        return { x: k.x, z: k.z, seg, da: Math.hypot(k.x - seg.ax, k.z - seg.az) * seg.faktor, db: Math.hypot(k.x - seg.bx, k.z - seg.bz) * seg.faktor };
+    })();
 
     const adressen = D.adressen.map(a => ({ ...a, name: `${a.s} ${a.h}` }));
 
@@ -246,9 +296,12 @@
     const TEILE = [
         { geo: box(0.5, 0.65, 0.28), pos: [0, 1.18, 0], fuer: alle, farbe: jacke },
         { geo: new THREE.SphereGeometry(0.14, 10, 8), pos: [0, 1.65, 0], fuer: alle, farbe: () => '#e8bf9a' },
-        { geo: zyl(0.2, 0.2, 0.03, 14), pos: [0, 1.77, 0], fuer: ausser('koenigin'), farbe: hut },
-        { geo: zyl(0.11, 0.13, 0.13, 12), pos: [0, 1.84, 0], fuer: ausser('koenigin'), farbe: hut },
-        { geo: new THREE.ConeGeometry(0.05, 0.3, 6), pos: [0.08, 2.0, 0], fuer: nur('koenig'), farbe: () => '#ffffff' },
+        { geo: zyl(0.2, 0.2, 0.03, 14), pos: [0, 1.77, 0], fuer: ausser('koenigin', 'koenig'), farbe: hut },
+        { geo: zyl(0.11, 0.13, 0.13, 12), pos: [0, 1.84, 0], fuer: ausser('koenigin', 'koenig'), farbe: hut },
+        // Zylinder des Königs: Krempe, hoher Hutkörper, silbernes Band
+        { geo: zyl(0.21, 0.21, 0.025, 16), pos: [0, 1.77, 0], fuer: nur('koenig'), farbe: () => '#151515' },
+        { geo: zyl(0.125, 0.12, 0.34, 16), pos: [0, 1.95, 0], fuer: nur('koenig'), farbe: () => '#151515' },
+        { geo: zyl(0.128, 0.128, 0.05, 16), pos: [0, 1.81, 0], fuer: nur('koenig'), farbe: () => '#c0c0c0' },
         { geo: box(0.18, 0.85, 0.2).translate(0, -0.425, 0), pos: [-0.12, 0.86, 0], winkel: p => schwung(p), fuer: alle, farbe: () => '#2b2b33' },
         { geo: box(0.18, 0.85, 0.2).translate(0, -0.425, 0), pos: [0.12, 0.86, 0], winkel: p => -schwung(p), fuer: alle, farbe: () => '#2b2b33' },
         { geo: box(0.13, 0.62, 0.15).translate(0, -0.31, 0), pos: [-0.32, 1.48, 0], winkel: p => armWinkel(p, -1), fuer: alle, farbe: jacke },
@@ -319,6 +372,142 @@
         return sprite;
     })();
 
+    // ---------- Zuschauer aus den Häusern ----------
+
+    const MAX_ZUSCHAUER = HANDY ? 40 : 90;
+    const AB_ENDE = Math.max(...personen.map(p => p.ab));
+    const TEMPO_ZUSCHAUER = { kind: 1.3, eltern: 1.1, aelter: 0.7 };
+    const HEMD = ['#d32f2f', '#1976d2', '#388e3c', '#fbc02d', '#7b1fa2', '#f57c00', '#455a64', '#c2185b', '#0097a7', '#f5f5f5'];
+    const HEMD_AELTER = ['#8d6e63', '#78909c', '#a1887f', '#607d8b', '#bcaaa4'];
+    const HOSE = ['#2b3a55', '#3e2723', '#212121', '#5d4037', '#1a237e'];
+    const HAARE = ['#3e2723', '#6d4c41', '#d7b46a', '#1b1b1b', '#a1662f'];
+    const HAUT = ['#e8bf9a', '#d9a77e', '#f1cdb0', '#a5734d'];
+    const wahl = liste => liste[Math.floor(zufall() * liste.length)];
+    let zuschauer = [];
+
+    // Jubeln: Arme hoch und winken; Ältere winken mit einer Hand und stützen sich auf den Stock
+    const zArm = (p, seite) => {
+        if (p.zustand === 'jubeln') {
+            if (p.art === 'aelter') return seite > 0 ? -0.3 : -2.4 + Math.sin(p.phase * 5) * 0.3;
+            return (p.art === 'kind' ? -2.8 : -2.6) + Math.sin(p.phase * 8 + seite) * 0.3;
+        }
+        if (p.art === 'aelter' && seite > 0) return -0.3;
+        return p.geht ? -Math.sin(p.phase) * 0.5 * seite : 0;
+    };
+    const zBein = (p, seite) => p.geht ? Math.sin(p.phase) * 0.5 * seite : 0;
+
+    const Z_TEILE = [
+        { geo: box(0.46, 0.6, 0.26), pos: [0, 1.15, 0], farbe: p => p.hemd },
+        { geo: new THREE.SphereGeometry(0.14, 10, 8), pos: [0, 1.62, 0], farbe: p => p.haut },
+        { geo: new THREE.SphereGeometry(0.15, 10, 6), pos: [0, 1.68, -0.02], skala: [1, 0.7, 1], farbe: p => p.haare },
+        { geo: box(0.17, 0.85, 0.19).translate(0, -0.425, 0), pos: [-0.11, 0.86, 0], winkel: p => zBein(p, 1), farbe: p => p.hose },
+        { geo: box(0.17, 0.85, 0.19).translate(0, -0.425, 0), pos: [0.11, 0.86, 0], winkel: p => zBein(p, -1), farbe: p => p.hose },
+        { geo: box(0.12, 0.6, 0.14).translate(0, -0.3, 0), pos: [-0.3, 1.44, 0], winkel: p => zArm(p, -1), farbe: p => p.hemd },
+        { geo: box(0.12, 0.6, 0.14).translate(0, -0.3, 0), pos: [0.3, 1.44, 0], winkel: p => zArm(p, 1), farbe: p => p.hemd },
+        { geo: zyl(0.02, 0.02, 0.95, 6), pos: [0.38, 0.47, 0.15], nur: 'aelter', farbe: () => '#4e342e' },
+    ];
+    for (const teil of Z_TEILE) {
+        teil.mesh = new THREE.InstancedMesh(teil.geo, material, MAX_ZUSCHAUER);
+        teil.mesh.frustumCulled = false;
+        teil.mesh.castShadow = !HANDY;
+        teil.mesh.count = 0;
+        szene.add(teil.mesh);
+    }
+
+    function zuschauerPlanen(route) {
+        const liste = [];
+        const kandidaten = adressen
+            .filter(a => a !== zustand.adresse)
+            .map(a => ({ a, n: route.pfad.naechstes(a.p[0], a.p[1]) }))
+            .filter(k => k.n.d < 28)
+            .sort((x, y) => x.n.s - y.n.s);
+        for (const { a, n } of kandidaten) {
+            if (liste.length >= MAX_ZUSCHAUER) break;
+            if (zufall() < 0.35) continue;      // nicht aus jedem Haus kommt jemand
+            const arten = zufall() < 0.6
+                ? ['eltern', ...(zufall() < 0.5 ? ['eltern'] : []), 'kind', ...(zufall() < 0.5 ? ['kind'] : [])]
+                : ['aelter', ...(zufall() < 0.6 ? ['aelter'] : [])];
+            const [dx, dz] = route.pfad.richtung(n.s);
+            const nx = -dz, nz = dx;
+            const seite = Math.sign((a.p[0] - n.x) * nx + (a.p[1] - n.z) * nz) || 1;
+            // Start an der Hauswand: von der Straße Richtung Haus, bis kurz vor das Gebäude
+            const tuer = koenigsHaus(a).tuer;
+            let start = tuer;
+            const hx = a.p[0] - tuer[0], hz = a.p[1] - tuer[1], hl = Math.hypot(hx, hz) || 1;
+            for (let d = 0.5; d < Math.min(15, hl); d += 0.5) {
+                const p = [tuer[0] + hx / hl * d, tuer[1] + hz / hl * d];
+                if (R.inGebaeude(p[0], p[1])) break;
+                start = p;
+            }
+            arten.forEach((art, i) => {
+                if (liste.length >= MAX_ZUSCHAUER) return;
+                const versatz = (i - (arten.length - 1) / 2) * 0.9;
+                let spot = null;
+                for (const abstand of [art === 'kind' ? 3.2 : 3.8, 2.8]) {
+                    const kandidat = [n.x + nx * seite * abstand + dx * versatz, n.z + nz * seite * abstand + dz * versatz];
+                    if (!R.inGebaeude(kandidat[0], kandidat[1])) { spot = kandidat; break; }
+                }
+                if (!spot) return;
+                const aelter = art === 'aelter';
+                liste.push({
+                    art, s: n.s, start, spot: { x: spot[0], z: spot[1], richtung: Math.atan2(-nx * seite, -nz * seite) },
+                    x: start[0], z: start[1], richtung: 0, geht: false, phase: zufall() * 6, zustand: 'drinnen',
+                    warte: 5 + zufall() * 10, skala: art === 'kind' ? 0.62 : aelter ? 0.97 : 1,
+                    hemd: wahl(aelter ? HEMD_AELTER : HEMD), hose: aelter ? '#616161' : wahl(HOSE),
+                    haare: aelter ? wahl(['#e0e0e0', '#bdbdbd', '#9e9e9e']) : wahl(HAARE), haut: wahl(HAUT),
+                });
+            });
+        }
+        // Farben einmalig je Teil setzen
+        for (const teil of Z_TEILE) {
+            liste.forEach((p, i) => teil.mesh.setColorAt(i, new THREE.Color(teil.farbe(p))));
+            if (teil.mesh.instanceColor) teil.mesh.instanceColor.needsUpdate = true;
+        }
+        return liste;
+    }
+
+    function zuschauerAktualisieren(dt) {
+        const kopf = zustand.sKopf, schwanz = kopf - AB_ENDE;
+        const unterwegs = ['marsch1', 'abholen', 'marsch2'].includes(zustand.phase);
+        for (const p of zuschauer) {
+            if (p.zustand === 'drinnen') {
+                if (unterwegs && kopf > p.s - 70 && schwanz < p.s + 5) p.zustand = 'raus';
+            } else if (p.zustand === 'raus') {
+                if (hingehen(p, p.spot, TEMPO_ZUSCHAUER[p.art] * dt)) p.zustand = 'jubeln';
+            } else if (p.zustand === 'jubeln') {
+                if (schwanz > p.s + 12 || zustand.phase === 'angekommen') {
+                    p.warte -= dt;
+                    if (p.warte <= 0) p.zustand = 'rein';
+                }
+            } else if (p.zustand === 'rein') {
+                if (hingehen(p, { x: p.start[0], z: p.start[1], richtung: p.richtung }, TEMPO_ZUSCHAUER[p.art] * dt)) p.zustand = 'fertig';
+            }
+            p.phase += dt * (p.geht ? 6 : 1);
+        }
+    }
+
+    const null3 = new THREE.Vector3(0, 0, 0);
+    function zuschauerZeichnen() {
+        for (const teil of Z_TEILE) {
+            teil.mesh.count = zuschauer.length;
+            zuschauer.forEach((p, i) => {
+                const sichtbar = p.zustand !== 'drinnen' && p.zustand !== 'fertig' && (!teil.nur || teil.nur === p.art);
+                if (!sichtbar) {
+                    m.compose(null3, q.identity(), null3);
+                } else {
+                    // Kinder hüpfen beim Jubeln
+                    const hops = p.zustand === 'jubeln' && p.art === 'kind' ? Math.abs(Math.sin(p.phase * 6)) * 0.18 : 0;
+                    mp.compose(v.set(p.x, hoehe(p.x, p.z) + hops, p.z), q.setFromEuler(e.set(0, p.richtung, 0)), v.clone().setScalar(p.skala));
+                    e.set(teil.winkel ? teil.winkel(p) : 0, 0, 0);
+                    ml.compose(v.set(...teil.pos), q.setFromEuler(e), teil.skala ? new THREE.Vector3(...teil.skala) : s1);
+                    m.multiplyMatrices(mp, ml);
+                }
+                teil.mesh.setMatrixAt(i, m);
+            });
+            teil.mesh.instanceMatrix.needsUpdate = true;
+        }
+    }
+
     // ---------- Ablauf ----------
 
     const zustand = {
@@ -377,6 +566,7 @@
             return false;
         }
         zustand.route = route;
+        zuschauer = zuschauerPlanen(route);
         zustand.sKopf = 0;
         zustand.zeit = 0;
         zustand.phase = 'treffen';
@@ -399,6 +589,7 @@
     function stoppen() {
         zustand.phase = 'aus';
         zustand.route = null;
+        zuschauer = [];
         koenigspaarAnDieTuer();
         musikStoppen();
     }
@@ -454,7 +645,9 @@
             else if (p.geht) p.phase += dt * 5;
         }
 
+        zuschauerAktualisieren(dt);
         figurenZeichnen(zustand.phase !== 'aus');
+        zuschauerZeichnen();
         const k = koenigspaar[0];
         schild.position.set((k.x + koenigspaar[1].x) / 2, hoehe(k.x, k.z) + 3.2, (k.z + koenigspaar[1].z) / 2);
         statusSetzen(STATUS[zustand.phase]);
@@ -673,5 +866,8 @@
     figurenZeichnen(false);
 
     // Für Tests
-    window.umzug = { zustand, personen, adressen, routePlanen, starten, stoppen, aktualisieren, adresseWaehlen, wegSuchen };
+    window.umzug = {
+        zustand, personen, adressen, routePlanen, starten, stoppen, aktualisieren, adresseWaehlen, wegSuchen,
+        get zuschauer() { return zuschauer; },
+    };
 })();
