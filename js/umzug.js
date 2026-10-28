@@ -454,10 +454,11 @@
         { geo: new THREE.ConeGeometry(0.08, 0.45, 10), pos: [0, 1.6, 0.42], rot: [-Math.PI / 2, 0, 0], fuer: nur('trompete'), farbe: () => GOLD },
         { geo: new THREE.ConeGeometry(0.12, 0.6, 10), pos: [0, 1.55, 0.45], rot: [-Math.PI / 2, 0, 0], fuer: nur('horn'), farbe: () => GOLD },
         { geo: zyl(0.3, 0.1, 0.85, 12), pos: [0.05, 1.45, 0.28], fuer: nur('tuba'), farbe: () => GOLD },
-        { geo: box(0.05, 0.06, 1.15), pos: [0.26, 1.55, -0.05], rot: [-0.9, 0, 0], fuer: nur('schuetze'), farbe: () => '#3b2a1e' },
+        // Gewehr geschultert: Kolben vorn unten in der Hand, Lauf zeigt schräg nach hinten oben
+        { geo: box(0.05, 0.06, 1.15), pos: [0.26, 1.55, -0.05], rot: [0.9, 0, 0], fuer: nur('schuetze'), farbe: () => '#3b2a1e' },
         // Eichenlaub oben im Gewehrlauf
-        { geo: new THREE.IcosahedronGeometry(0.1, 0), pos: [0.26, 2.08, 0.36], skala: [0.9, 1.5, 0.9], fuer: nur('schuetze'), farbe: () => '#3f7f2a' },
-        { geo: new THREE.IcosahedronGeometry(0.07, 0), pos: [0.31, 2.0, 0.42], fuer: nur('schuetze'), farbe: () => '#4f9a34' },
+        { geo: new THREE.IcosahedronGeometry(0.1, 0), pos: [0.26, 2.08, -0.46], skala: [0.9, 1.5, 0.9], fuer: nur('schuetze'), farbe: () => '#3f7f2a' },
+        { geo: new THREE.IcosahedronGeometry(0.07, 0), pos: [0.31, 2.0, -0.52], fuer: nur('schuetze'), farbe: () => '#4f9a34' },
     ];
 
     const m = new THREE.Matrix4(), mp = new THREE.Matrix4(), ml = new THREE.Matrix4();
