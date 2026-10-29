@@ -1,5 +1,5 @@
 // Festplanung für das Schützenfest in Rolfzen. Wird von Karte und Rundgang gelesen.
-// Zelt, Asphaltfläche und Bäume nach einem Luftbild von 2026 eingemessen.
+// Zelt, Asphaltfläche und Bäume nach einem Luftbild von 2026 eingemessen; Maße von Zelt und Buden nach Angabe.
 // Ausrichtung: Längsachse in Grad im Uhrzeigersinn von Norden.
 // Positionen auf dem Festplatz in Metern relativ zur Zeltmitte:
 //   laengs = entlang der Längsachse (positiv Richtung Süden), quer = positiv Richtung Osten.
@@ -8,8 +8,8 @@ const ROLFZEN_FEST = {
         name: 'Schützenzelt',
         lat: 51.8456594,
         lon: 9.1419388,
-        laenge: 28,
-        breite: 13,
+        laenge: 36,
+        breite: 14,
         ausrichtung: 147.9,
         eingang: 'ost',     // östliche Längsseite, zum Asphaltplatz, mit kleiner Rampe
         eingangLaengs: 7.4, // Mitte des Eingangs, zwischen Pizza und Pommes
@@ -18,12 +18,12 @@ const ROLFZEN_FEST = {
     },
     // Einrichtung im Zelt: Rechtecke als [laengs von, laengs bis, quer von, quer bis], Höhe in m
     innen: {
-        buehne: { name: 'Bühne', von: [-14, -10, -5.5, 5.5], hoehe: 0.8 },              // Norden, für die Band
+        buehne: { name: 'Bühne', von: [-18, -14, -5.5, 5.5], hoehe: 0.8 },              // Norden, für die Band
         // Westen mittig, 4 × 6 m: Königspaar in der Mitte, je ein Hofstaatpaar links und rechts
         koenigsbuehne: { name: 'Königspaar', von: [-3, 3, -6.5, -2.5], hoehe: 0.6 },
         // Getränkekühlschränke links und rechts neben der Königsbühne (laengs, quer)
         kuehlschraenke: [[-3.6, -5.9], [3.6, -5.9]],
-        theke: { name: 'Getränke', von: [11.6, 12.4, -4.5, 4.5], hoehe: 1.1 },          // Süden
+        theke: { name: 'Getränke', von: [15.6, 16.4, -4.5, 4.5], hoehe: 1.1 },          // Süden
         // Preistafel über der Theke (Beispielpreise, bitte anpassen)
         preise: [
             ['Bier 0,3 l', '2,50 €'], ['Bier 0,5 l', '4,00 €'], ['Cola 0,3 l', '2,50 €'],
@@ -32,31 +32,31 @@ const ROLFZEN_FEST = {
         ],
         // Zwei Bildschirme links und rechts neben der Theke unter der Decke; wechselnde Werbung
         werbung: [
-            { titel: 'Wok', text: 'Nudeln to go – frisch aus dem Wok', farbe: '#d4380d' },
+            { titel: 'Asia-Imbiss', text: 'Nudeln to go – frisch aus dem Wok', farbe: '#d4380d' },
             { titel: 'Pizza', text: 'Heiß und knusprig – gleich vor dem Zelt', farbe: '#2e7d32' },
             { titel: 'Pommes & Bratwurst', text: 'Der Klassiker vom Grill', farbe: '#f9a825' },
             { titel: 'Veltins', text: 'Frisch gezapft an der Bierbude', farbe: '#1f7a3a' },
             { titel: 'Süßigkeiten', text: 'Gebrannte Mandeln & Zuckerwatte', farbe: '#e91e8c' },
         ],
         werbungWechsel: 6,  // Sekunden je Anzeige
-        stehtische: [[8.8, -3.6], [8.8, -1.2], [8.8, 1.2], [8.8, 3.6]],
+        stehtische: [[12.8, -3.6], [12.8, -1.2], [12.8, 1.2], [12.8, 3.6]],
     },
     // Offizierhaus: Öffnung auf der Westseite (zum Platz) mit zwei Toiletten
     offizierhaus: { toiletten: ['Damen', 'Herren'] },
     // Asphaltierte Fläche vor dem Eingang (laengs, quer); endet im Norden vor der Wiese (Drohnenfoto)
     platz: [[-9.0, 6.6], [-9.0, 15.0], [-5.0, 23.4], [0.6, 27.6], [4.9, 23.7], [8.1, 15.5], [13.3, 7.8], [14.0, 6.7]],
-    // Aufstellung nach dem Drohnenfoto; Größen ungefähr, genaue Maße folgen.
+    // Aufstellung nach dem Drohnenfoto, Maße nach Angabe.
     // breite = Länge der Front, tiefe = von der Front nach hinten; die Front zeigt zum Punkt blickZu (laengs, quer).
     buden: [
-        // Wok und Pizza auf der Rasenfläche südlich des Asphalts
-        { name: 'Wok', laengs: 18.5, quer: 15.5, breite: 3, tiefe: 2.4, farbe: '#d4380d', blickZu: [2, 15.5] },
-        { name: 'Pizza', laengs: 16.0, quer: 9.0, breite: 3.5, tiefe: 3, farbe: '#2e7d32', blickZu: [5, 15] },
-        { name: 'Pommes & Bratwurst', laengs: 2.8, quer: 8.3, breite: 5.5, tiefe: 2.4, farbe: '#f9a825', blickZu: [2.8, 20] },
+        // Asia-Imbiss (Wok) und Pizza auf der Rasenfläche südlich des Asphalts
+        { name: 'Asia-Imbiss', laengs: 18.5, quer: 15.5, breite: 3.5, tiefe: 2, farbe: '#d4380d', blickZu: [2, 15.5] },
+        { name: 'Pizza', laengs: 16.0, quer: 9.6, breite: 3.5, tiefe: 2, farbe: '#2e7d32', blickZu: [5, 15] },
+        { name: 'Pommes & Bratwurst', laengs: 2.8, quer: 8.7, breite: 6, tiefe: 2.3, farbe: '#f9a825', blickZu: [2.8, 20] },
         { name: 'Bierbude (Veltins)', laengs: -4.5, quer: 11.5, breite: 6, tiefe: 2.5, farbe: '#1f7a3a', blickZu: [5, 11.5] },
         // Vor den Toiletten, parallel zur Westwand des Offizierhauses, gut 2 m Abstand zur Wand
-        { name: 'Schießbude', laengs: 4.85, quer: 22.4, breite: 10, tiefe: 2.8, farbe: '#1565c0', blickZu: [3.05, 12.6] },
+        { name: 'Schießbude', laengs: 4.85, quer: 22.4, breite: 14, tiefe: 2.5, farbe: '#1565c0', blickZu: [3.05, 12.6] },
         // Vor dem Baum am Nordostrand (Stamm bei laengs -6, quer 24), Front zum Platz
-        { name: 'Süßigkeiten', laengs: -5.5, quer: 21.2, breite: 7, tiefe: 2.5, farbe: '#e91e8c', blickZu: [-5.5, 12] },
+        { name: 'Süßigkeiten', laengs: -6.4, quer: 21.2, breite: 10, tiefe: 2.5, farbe: '#e91e8c', blickZu: [-6.4, 12] },
     ],
     // Zwei Banner „Schützenfest Rolfzen“ auf der Rasenfläche in der Südostecke,
     // südlich des Straßenendes An der Lehmkuhle; jeweils von [laengs, quer] bis [laengs, quer]
