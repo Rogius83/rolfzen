@@ -54,9 +54,9 @@ const ROLFZEN_FEST = {
         { name: 'Pommes & Bratwurst', laengs: 2.8, quer: 8.7, breite: 6, tiefe: 2.3, farbe: '#f9a825', blickZu: [2.8, 20] },
         { name: 'Bierbude (Veltins)', laengs: -4.5, quer: 11.5, breite: 6, tiefe: 2.5, farbe: '#1f7a3a', blickZu: [5, 11.5] },
         // Vor den Toiletten, parallel zur Westwand des Offizierhauses, gut 2 m Abstand zur Wand
-        { name: 'Schießbude', laengs: 4.85, quer: 22.4, breite: 14, tiefe: 2.5, farbe: '#1565c0', blickZu: [3.05, 12.6] },
+        { name: 'Schießbude', laengs: 3.85, quer: 22.4, breite: 14, tiefe: 2.5, farbe: '#1565c0', blickZu: [2.05, 12.6] },
         // Vor dem Baum am Nordostrand (Stamm bei laengs -6, quer 24), Front zum Platz
-        { name: 'Süßigkeiten', laengs: -6.4, quer: 21.2, breite: 10, tiefe: 2.5, farbe: '#e91e8c', blickZu: [-6.4, 12] },
+        { name: 'Süßigkeiten', laengs: -9.4, quer: 21.2, breite: 10, tiefe: 2.5, farbe: '#e91e8c', blickZu: [-9.4, 12] },
     ],
     // Zwei Banner „Schützenfest Rolfzen“ auf der Rasenfläche in der Südostecke,
     // südlich des Straßenendes An der Lehmkuhle; jeweils von [laengs, quer] bis [laengs, quer]
